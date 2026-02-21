@@ -1,0 +1,297 @@
+import { useState, useRef, useEffect } from 'react';
+import { MessageCircle, X, Send, Bot, Plus, Minimize2 } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { botResponses } from '../../data/mockData';
+import { sendChatMessage } from '../../utils/geminiService';
+
+export default function FloatingChat() {
+    const { conversations, sendMessage, addBotMessage, createConversation } = useApp();
+    const { user } = useAuth();
+
+    const [open, setOpen] = useState(false);
+    const [input, setInput] = useState('');
+    const [typing, setTyping] = useState(false);
+    const [unread, setUnread] = useState(0);
+    const messagesEndRef = useRef(null);
+
+    // Active conversation — pick the first one or create one on first open
+    const [convId, setConvId] = useState(null);
+    const conv = conversations.find(c => c.conversation_id === convId);
+
+    useEffect(() => {
+        if (open && !convId) {
+            if (conversations.length > 0) {
+                setConvId(conversations[0].conversation_id);
+            } else {
+                const newConv = createConversation('Chat with Moda');
+                setConvId(newConv.conversation_id);
+            }
+            setUnread(0);
+        }
+    }, [open]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [conv?.messages.length, typing]);
+
+    const handleSend = async () => {
+        if (!input.trim() || !convId) return;
+        const msg = input.trim();
+        setInput('');
+        sendMessage(convId, msg);
+        setTyping(true);
+
+        try {
+            // Try real Gemini chat first
+            const history = conv?.messages || [];
+            const aiReply = await sendChatMessage(history, msg);
+            const reply = aiReply || botResponses[Math.floor(Math.random() * botResponses.length)];
+            addBotMessage(convId, reply);
+        } catch {
+            addBotMessage(convId, botResponses[Math.floor(Math.random() * botResponses.length)]);
+        }
+        setTyping(false);
+    };
+
+    const handleNewConv = () => {
+        const newConv = createConversation('New chat');
+        setConvId(newConv.conversation_id);
+    };
+
+    const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    return (
+        <>
+            {/* Floating button */}
+            <button
+                id="floating-chat-btn"
+                className={`floating-chat-btn${open ? ' open' : ''}`}
+                onClick={() => { setOpen(v => !v); setUnread(0); }}
+                aria-label="Open chat"
+            >
+                {open ? <X size={22} /> : <MessageCircle size={22} />}
+                {unread > 0 && !open && <span className="chat-badge">{unread}</span>}
+            </button>
+
+            {/* Chat panel */}
+            {open && (
+                <div className="floating-chat-panel animate-slideUp" id="floating-chat-panel">
+                    {/* Header */}
+                    <div className="fc-header">
+                        <div className="flex items-center gap-3">
+                            <div className="fc-avatar"><Bot size={16} /></div>
+                            <div>
+                                <div className="font-bold text-sm">Moda Assistant</div>
+                                <div className="text-xs" style={{ color: 'var(--clr-success)' }}>● Online — ask me anything!</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button className="btn btn-ghost btn-icon btn-sm" onClick={handleNewConv} title="New conversation"><Plus size={15} /></button>
+                            <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setOpen(false)} title="Minimize"><Minimize2 size={15} /></button>
+                        </div>
+                    </div>
+
+                    {/* Conversation switcher (if multiple) */}
+                    {conversations.length > 1 && (
+                        <div className="fc-conv-tabs">
+                            {conversations.slice(0, 4).map(c => (
+                                <button key={c.conversation_id}
+                                    className={`fc-conv-tab${convId === c.conversation_id ? ' active' : ''}`}
+                                    onClick={() => setConvId(c.conversation_id)}>
+                                    {c.title.slice(0, 14)}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Messages */}
+                    <div className="fc-messages">
+                        {!user && (
+                            <div className="fc-guest-note">
+                                <Bot size={16} />
+                                <span>You're chatting as a guest. <a href="/login" style={{ color: 'var(--clr-primary)' }}>Sign in</a> for order-related help.</span>
+                            </div>
+                        )}
+                        {conv?.messages.map(msg => (
+                            <div key={msg.message_id} className={`fc-msg ${msg.sender_type}`}>
+                                {msg.sender_type === 'bot' && (
+                                    <div className="fc-bot-dot"><Bot size={10} /></div>
+                                )}
+                                <div className="flex-col" style={{ gap: 2, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                                    <div className={`chat-bubble ${msg.sender_type}`} style={{ fontSize: 13 }}>{msg.content}</div>
+                                    <div className="text-xs" style={{ color: 'var(--clr-text-3)', padding: '0 4px' }}>{formatTime(msg.sent_at)}</div>
+                                </div>
+                            </div>
+                        ))}
+                        {typing && (
+                            <div className="fc-msg bot">
+                                <div className="fc-bot-dot"><Bot size={10} /></div>
+                                <div className="chat-bubble bot" style={{ padding: '10px 14px' }}>
+                                    <div className="typing-dots"><span /><span /><span /></div>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    {/* Quick suggestions */}
+                    {conv?.messages.length <= 1 && (
+                        <div className="fc-suggestions">
+                            {['Track my order', 'Sizing help', 'Return policy', 'Active coupons'].map(s => (
+                                <button key={s} className="fc-suggest-btn" onClick={() => { setInput(s); }}>
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Input */}
+                    <div className="fc-input-row">
+                        <input
+                            id="floating-chat-input"
+                            className="form-input"
+                            style={{ flex: 1, fontSize: 13, padding: '9px 14px', background: 'var(--glass-bg-heavy)', backdropFilter: 'var(--glass-blur-sm)', WebkitBackdropFilter: 'var(--glass-blur-sm)' }}
+                            placeholder="Ask about products, orders…"
+                            value={input}
+                            onChange={e => setInput(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                            disabled={typing}
+                            autoFocus
+                        />
+                        <button
+                            id="floating-chat-send"
+                            className="btn btn-primary"
+                            style={{ padding: '9px 14px' }}
+                            onClick={handleSend}
+                            disabled={!input.trim() || typing}
+                        >
+                            <Send size={15} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+        /* ── Floating button ── */
+        .floating-chat-btn {
+          position: fixed; bottom: 28px; right: 28px; z-index: 1000;
+          width: 56px; height: 56px; border-radius: 50%;
+          background: linear-gradient(135deg, var(--clr-primary), var(--clr-accent));
+          color: white; display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 4px 24px rgba(168,85,247,0.55), 0 0 0 1px rgba(255,255,255,0.1);
+          transition: all 0.32s cubic-bezier(0.34,1.56,0.64,1); cursor: pointer; border: none;
+        }
+        .floating-chat-btn:hover { transform: scale(1.12); box-shadow: 0 8px 36px rgba(168,85,247,0.7), 0 0 0 1px rgba(255,255,255,0.15); }
+        .floating-chat-btn.open {
+          background: var(--glass-bg-heavy);
+          backdrop-filter: var(--glass-blur-sm); -webkit-backdrop-filter: var(--glass-blur-sm);
+          color: var(--clr-text); border: 1px solid var(--glass-border);
+          box-shadow: var(--shadow-md), var(--shadow-glow-sm);
+        }
+        .chat-badge { position: absolute; top: -4px; right: -4px; width: 20px; height: 20px; border-radius: 50%; background: var(--clr-error); color: white; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
+        /* ── Chat panel — full glassmorphism ── */
+        .floating-chat-panel {
+          position: fixed; bottom: 96px; right: 28px; z-index: 999;
+          width: 370px; max-height: 560px;
+          background: var(--glass-bg-heavy);
+          backdrop-filter: blur(32px) saturate(1.8);
+          -webkit-backdrop-filter: blur(32px) saturate(1.8);
+          border: 1px solid var(--glass-border);
+          border-radius: var(--r-xl);
+          box-shadow: var(--shadow-xl), var(--shadow-glow-sm), inset 0 1px 0 rgba(255,255,255,0.08);
+          display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* ── Header ── */
+        .fc-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: var(--sp-4) var(--sp-5);
+          background: linear-gradient(135deg, rgba(168,85,247,0.14), rgba(240,171,252,0.06));
+          border-bottom: 1px solid var(--glass-border);
+          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        }
+        .fc-avatar {
+          width: 34px; height: 34px; border-radius: 50%;
+          background: linear-gradient(135deg, var(--clr-primary), var(--clr-accent));
+          display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;
+          box-shadow: 0 0 14px rgba(168,85,247,0.45);
+        }
+
+        /* ── Conversation tabs ── */
+        .fc-conv-tabs {
+          display: flex; gap: 4px; padding: 6px 10px;
+          border-bottom: 1px solid var(--glass-border);
+          background: rgba(168,85,247,0.04); overflow-x: auto;
+        }
+        .fc-conv-tab { padding: 4px 10px; border-radius: var(--r-full); font-size: 11px; font-weight: 600; color: var(--clr-text-3); white-space: nowrap; transition: all var(--tr-fast); }
+        .fc-conv-tab:hover, .fc-conv-tab.active { background: rgba(168,85,247,0.14); color: var(--clr-primary); box-shadow: 0 0 8px rgba(168,85,247,0.12); }
+
+        /* ── Messages area ── */
+        .fc-messages {
+          flex: 1; overflow-y: auto; padding: var(--sp-4);
+          display: flex; flex-direction: column; gap: var(--sp-3); scroll-behavior: smooth;
+        }
+        .fc-messages::-webkit-scrollbar { width: 4px; }
+        .fc-messages::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 9999px; }
+
+        .fc-msg { display: flex; gap: 8px; align-items: flex-end; }
+        .fc-msg.user { flex-direction: row-reverse; }
+
+        .fc-bot-dot {
+          width: 24px; height: 24px; border-radius: 50%;
+          background: linear-gradient(135deg, var(--clr-primary), var(--clr-accent));
+          display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;
+          box-shadow: 0 0 10px rgba(168,85,247,0.35);
+        }
+
+        /* ── Guest note ── */
+        .fc-guest-note {
+          display: flex; align-items: center; gap: 8px;
+          background: rgba(168,85,247,0.07);
+          border: 1px solid rgba(168,85,247,0.18);
+          border-radius: var(--r-md); padding: 8px 12px;
+          font-size: 12px; color: var(--clr-text-3); margin-bottom: 4px;
+          backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        }
+
+        /* ── Quick suggestions ── */
+        .fc-suggestions { padding: 4px 12px 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+        .fc-suggest-btn {
+          padding: 5px 11px;
+          border: 1px solid var(--glass-border);
+          border-radius: var(--r-full); font-size: 11px; font-weight: 500;
+          color: var(--clr-text-2); cursor: pointer;
+          background: var(--glass-bg);
+          backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+          transition: all var(--tr-fast);
+        }
+        .fc-suggest-btn:hover {
+          border-color: rgba(168,85,247,0.4); color: var(--clr-primary);
+          background: rgba(168,85,247,0.08); box-shadow: 0 0 8px rgba(168,85,247,0.12);
+        }
+
+        /* ── Input bar ── */
+        .fc-input-row {
+          display: flex; gap: 8px; padding: var(--sp-3) var(--sp-4);
+          border-top: 1px solid var(--glass-border);
+          background: rgba(168,85,247,0.04);
+          backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        }
+
+        /* ── Typing dots ── */
+        .typing-dots { display: flex; gap: 4px; align-items: center; }
+        .typing-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--clr-text-3); animation: bounce 1.2s infinite; }
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+
+        @media (max-width: 480px) {
+          .floating-chat-panel { width: calc(100vw - 24px); right: 12px; bottom: 84px; }
+          .floating-chat-btn  { right: 16px; bottom: 20px; }
+        }
+      `}</style>
+        </>
+    );
+}
