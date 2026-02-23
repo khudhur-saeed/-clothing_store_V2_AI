@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import app.models  # registers all models with SQLAlchemy
-from app.routers import auth
+from app.routers import auth, products
 
 app = FastAPI(title="Moda Clothing Store API", version="1.0.0")
 
@@ -14,8 +14,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# from app.routers import auth, products, ...
 app.include_router(auth.router)
+app.include_router(products.router)
 
 @app.get("/")
 def root():
