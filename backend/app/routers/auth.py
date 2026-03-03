@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_current_user
 from app.models.user import User
 from app.core.security import hash_password, verify_password,create_access_token
 
@@ -34,3 +34,38 @@ def login(email: str, password: str, db:Session = Depends(get_db)):
 
     token = create_access_token({"sub": user.user_id})
     return {"access_token": token, "token_type": "bearer", "user_id": user.user_id, "role": user.role}
+
+
+@router.get("/me")
+def get_me(current_user=Depends(get_current_user)):
+    return {
+        "user_id": current_user.user_id,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "email": current_user.email,
+        "phone_no": current_user.phone_no,
+        "role": current_user.role
+    }
+
+
+@router.put("/me")
+def update_me(
+    first_name: str = None,
+    last_name: str = None,
+    phone_no: str = None,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if first_name: current_user.first_name = first_name
+    if last_name: current_user.last_name = last_name
+    if phone_no: current_user.phone_no = phone_no
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "user_id": current_user.user_id,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "email": current_user.email,
+        "phone_no": current_user.phone_no,
+        "role": current_user.role
+    }
