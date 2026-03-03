@@ -23,7 +23,7 @@ def register(first_name: str,last_name: str, email: str, password: str, db:Sessi
     db.commit()
     db.refresh(new_user)
 
-    token = create_access_token({"sub": new_user.user_id})
+    token = create_access_token({"sub": str(new_user.user_id)})
     return {"access_token": token, "token_type": "bearer"}
 
 @router.post("/login")
@@ -32,7 +32,7 @@ def login(email: str, password: str, db:Session = Depends(get_db)):
     if not user or not verify_password(password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    token = create_access_token({"sub": user.user_id})
+    token = create_access_token({"sub": str(user.user_id)})
     return {"access_token": token, "token_type": "bearer", "user_id": user.user_id, "role": user.role}
 
 

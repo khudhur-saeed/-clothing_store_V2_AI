@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, X, Eye, Lock, Trash2, Package } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { mockProducts } from '../../data/mockData';
+import { apiCall } from '../../api/client';
 import { Link } from 'react-router-dom';
 
 const PIECE_TYPES = ['top', 'bottom', 'outerwear', 'footwear', 'accessory'];
@@ -14,6 +14,11 @@ export default function OutfitBuilderPage() {
     const [showCreate, setShowCreate] = useState(false);
     const [newOutfit, setNewOutfit] = useState({ name: '', description: '', visibility: 'public' });
     const [addingType, setAddingType] = useState(null);
+    const [allProducts, setAllProducts] = useState([]);
+
+    useEffect(() => {
+        apiCall('/products/').then(data => setAllProducts(data)).catch(() => { });
+    }, []);
 
     if (!user) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
@@ -23,7 +28,10 @@ export default function OutfitBuilderPage() {
     );
 
     const currentOutfit = outfits.find(o => o.outfit_id === selectedOutfit);
-    const outfitProducts = currentOutfit ? mockProducts.filter(p => currentOutfit.products.includes(p.id)) : [];
+    // outfitProducts: find real product objects for IDs stored in outfit
+    const outfitProducts = currentOutfit
+        ? allProducts.filter(p => currentOutfit.products.includes(p.product_id))
+        : [];
 
     const handleCreate = () => {
         if (!newOutfit.name) return;
@@ -33,8 +41,16 @@ export default function OutfitBuilderPage() {
         showToast(`Outfit "${newOutfit.name}" created!`);
     };
 
+    // Group products by category for the picker (use category as piece_type proxy)
     const productsByType = {};
-    PIECE_TYPES.forEach(pt => { productsByType[pt] = mockProducts.filter(p => p.piece_type === pt); });
+    PIECE_TYPES.forEach(pt => {
+        productsByType[pt] = allProducts.filter(p =>
+            (p.category || '').toLowerCase().includes(pt) ||
+            (p.piece_type || '').toLowerCase().includes(pt)
+        );
+        // fallback: show all if empty
+        if (!productsByType[pt].length) productsByType[pt] = allProducts;
+    });
 
     return (
         <div className="page">
@@ -108,9 +124,11 @@ export default function OutfitBuilderPage() {
                                                 <div className="outfit-slot-label">{pt.toUpperCase()}</div>
                                                 {piece ? (
                                                     <div className="outfit-slot-piece">
-                                                        <img src={piece.images[0]?.url} alt={piece.name} />
+                                                        <div style={{ width: '100%', aspectRatio: '3/4', background: 'var(--clr-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 'var(--r-sm)' }}>
+                                                            <Package size={24} color="var(--clr-border)" />
+                                                        </div>
                                                         <div className="outfit-slot-overlay">
-                                                            <button className="btn btn-danger btn-sm" onClick={() => removeFromOutfit(currentOutfit.outfit_id, piece.id)}>
+                                                            <button className="btn btn-danger btn-sm" onClick={() => removeFromOutfit(currentOutfit.outfit_id, piece.product_id)}>
                                                                 <X size={13} /> Remove
                                                             </button>
                                                         </div>
@@ -175,10 +193,12 @@ export default function OutfitBuilderPage() {
                         <div className="modal-body">
                             <div className="grid-3 grid" style={{ gap: 'var(--sp-4)' }}>
                                 {productsByType[addingType]?.map(p => (
-                                    <button key={p.id} className="product-picker-item" onClick={() => { addToOutfit(currentOutfit.outfit_id, p.id); setAddingType(null); showToast(`${p.name} added to outfit!`); }}>
-                                        <img src={p.images[0]?.url} alt={p.name} />
+                                    <button key={p.product_id} className="product-picker-item" onClick={() => { addToOutfit(currentOutfit.outfit_id, p.product_id); setAddingType(null); showToast(`${p.name} added to outfit!`); }}>
+                                        <div style={{ width: '100%', aspectRatio: '3/4', background: 'var(--clr-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Package size={28} color="var(--clr-border)" />
+                                        </div>
                                         <div className="text-xs font-semibold" style={{ marginTop: 6, textAlign: 'left' }}>{p.name}</div>
-                                        <div className="text-xs text-primary">${p.variants[0]?.price.toFixed(2)}</div>
+                                        <div className="text-xs text-primary">${Number(p.price).toFixed(2)}</div>
                                     </button>
                                 ))}
                             </div>

@@ -4,7 +4,7 @@ import { Check, Plus, MapPin, CreditCard, Banknote, Truck, ChevronRight } from '
 import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { mockCoupons } from '../../data/mockData';
+import { apiCall } from '../../api/client';
 
 const STEPS = ['Delivery', 'Payment', 'Review'];
 
@@ -37,11 +37,12 @@ export default function CheckoutPage() {
     const total = cartTotal - discount + shipping;
     const addrObj = addresses.find(a => a.address_id === selectedAddr);
 
-    const applyCoupon = () => {
-        const found = mockCoupons.find(c => c.coupon_code === couponCode.toUpperCase() && c.is_active);
-        if (!found) { setCouponErr('Invalid coupon.'); return; }
-        setCoupon(found); setCouponErr('');
-        showToast(`Coupon applied! ${found.discount}% off`);
+    const applyCoupon = async () => {
+        try {
+            const found = await apiCall('/coupons/validate', {}, { code: couponCode.toUpperCase(), order_amount: cartTotal });
+            setCoupon(found); setCouponErr('');
+            showToast(`Coupon applied! ${found.discount}% off`);
+        } catch (err) { setCouponErr(err.message || 'Invalid coupon.'); }
     };
 
     const handleSaveAddr = () => {

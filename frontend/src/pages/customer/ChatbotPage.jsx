@@ -2,8 +2,17 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Plus, MessageCircle, Trash2, Bot } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { botResponses } from '../../data/mockData';
 import { Link } from 'react-router-dom';
+
+const BOT_REPLIES = [
+    "I'm here to help! What would you like to know about our products?",
+    "Great question! Our collection is updated regularly. Check out the catalog for the latest items.",
+    "For order tracking, head to My Orders in your profile menu.",
+    "We offer free shipping on orders over $150!",
+    "If you need to return an item, please contact support within 30 days of purchase.",
+    "You can apply coupon codes at checkout to get a discount on your order.",
+    "Our sizing guide is available on each product page to help you find the perfect fit.",
+];
 
 export default function ChatbotPage() {
     const { conversations, sendMessage, addBotMessage, createConversation } = useApp();
@@ -32,7 +41,7 @@ export default function ChatbotPage() {
         sendMessage(activeConv, msg);
         setTyping(true);
         await new Promise(r => setTimeout(r, 900 + Math.random() * 800));
-        const reply = botResponses[Math.floor(Math.random() * botResponses.length)];
+        const reply = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
         addBotMessage(activeConv, reply);
         setTyping(false);
     };

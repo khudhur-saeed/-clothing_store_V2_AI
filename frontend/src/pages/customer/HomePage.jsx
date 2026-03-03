@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, Star, TrendingUp, ShieldCheck, Truck, RefreshCw } from 'lucide-react';
-import { mockProducts, mockCategories } from '../../data/mockData';
+import { useProducts } from '../../api/products';
 import ProductCard from '../../components/ui/ProductCard';
 
-const heroSlides = [
+const DEFAULT_SLIDES = [
     { title: 'New Season', sub: 'Arrivals', tag: 'Spring/Summer 2026', cta: 'Shop Collection', img: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=1200&q=80', link: '/products' },
     { title: 'Curated', sub: 'Outfits', tag: 'Build Your Look', cta: 'Create Outfit', img: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80', link: '/outfits' },
-    { title: 'Premium', sub: 'Accessories', tag: 'Complete Your Style', cta: 'Shop Accessories', img: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=1200&q=80', link: '/products?category=3' },
+    { title: 'Premium', sub: 'Accessories', tag: 'Complete Your Style', cta: 'Shop Now', img: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=1200&q=80', link: '/products' },
 ];
 
 const benefits = [
@@ -17,21 +17,31 @@ const benefits = [
     { icon: Star, title: 'Premium Quality', desc: 'Curated from top designers' },
 ];
 
-const catImages = {
-    1: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=400&q=80',
-    2: 'https://images.unsplash.com/photo-1490578474895-399ad4351e4c?w=400&q=80',
-    3: 'https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=400&q=80',
-};
-
 export default function HomePage() {
     const [slide, setSlide] = useState(0);
-    const parents = mockCategories.filter(c => !c.parent_id);
-    const featured = mockProducts.slice(0, 8);
-    const trending = [...mockProducts].sort((a, b) => b.review_count - a.review_count).slice(0, 4);
+    const [heroSlides, setHeroSlides] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('moda_hero_slides')) || DEFAULT_SLIDES; }
+        catch { return DEFAULT_SLIDES; }
+    });
+
+    // Fetch real products from backend
+    const { products: newArrivals, loading: loadingNew } = useProducts({});
 
     useEffect(() => {
         const t = setInterval(() => setSlide(s => (s + 1) % heroSlides.length), 5000);
         return () => clearInterval(t);
+    }, [heroSlides.length]);
+
+    // Listen for admin updates to hero slides
+    useEffect(() => {
+        const onStorage = () => {
+            try {
+                const slides = JSON.parse(localStorage.getItem('moda_hero_slides'));
+                if (slides) setHeroSlides(slides);
+            } catch { }
+        };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
     }, []);
 
     const s = heroSlides[slide];
@@ -52,10 +62,9 @@ export default function HomePage() {
                         <Link to="/outfits" className="btn btn-outline btn-lg"><Sparkles size={18} /> Build Outfit</Link>
                     </div>
                 </div>
-                {/* Slide dots */}
                 <div className="hero-dots">
                     {heroSlides.map((_, i) => (
-                        <button key={i} className={`hero-dot${i === slide ? ' active' : ''}`} onClick={() => setSlide(i)} aria-label={`Slide ${i + 1}`} />
+                        <button key={i} className={`hero-dot${i === slide ? ' active' : ''}`} onClick={() => setSlide(i)} />
                     ))}
                 </div>
             </section>
@@ -77,45 +86,35 @@ export default function HomePage() {
                 </div>
             </section>
 
-            {/* ── CATEGORIES ── */}
-            <section className="section">
-                <div className="container">
-                    <div className="section-header flex items-center justify-between">
-                        <div>
-                            <h2 className="section-title">Shop by Category</h2>
-                            <p className="section-sub">Explore our curated collections</p>
+            {/* ── PRODUCTS ── */}
+            {!loadingNew && newArrivals.length > 0 && (
+                <section className="section" style={{ background: 'var(--clr-bg-2)' }}>
+                    <div className="container">
+                        <div className="section-header flex items-center justify-between">
+                            <div>
+                                <h2 className="section-title">New Arrivals</h2>
+                                <p className="section-sub">The latest pieces just added to our collection</p>
+                            </div>
+                            <Link to="/products" className="btn btn-outline">View All <ArrowRight size={15} /></Link>
                         </div>
-                        <Link to="/products" className="btn btn-outline">View All <ArrowRight size={15} /></Link>
+                        <div className="grid-4 grid" style={{ gap: 'var(--sp-6)' }}>
+                            {newArrivals.slice(0, 8).map(p => <ProductCard key={p.id} product={p} />)}
+                        </div>
                     </div>
-                    <div className="grid-3 grid" style={{ gap: 'var(--sp-6)' }}>
-                        {parents.map(cat => (
-                            <Link to={`/products?category=${cat.id}`} key={cat.id} className="cat-card" id={`cat-${cat.id}`}>
-                                <img src={catImages[cat.id] || catImages[1]} alt={cat.name} />
-                                <div className="cat-card__overlay">
-                                    <h3 className="cat-card__name">{cat.name}</h3>
-                                    <span className="btn btn-outline btn-sm" style={{ marginTop: 8 }}>Shop Now <ArrowRight size={13} /></span>
-                                </div>
-                            </Link>
-                        ))}
-                    </div>
-                </div>
-            </section>
+                </section>
+            )}
 
-            {/* ── NEW ARRIVALS ── */}
-            <section className="section" style={{ background: 'var(--clr-bg-2)' }}>
-                <div className="container">
-                    <div className="section-header flex items-center justify-between">
-                        <div>
-                            <h2 className="section-title">New Arrivals</h2>
-                            <p className="section-sub">The latest pieces just added to our collection</p>
-                        </div>
-                        <Link to="/products" className="btn btn-outline">View All <ArrowRight size={15} /></Link>
+            {/* ── EMPTY STATE — show when no products yet ── */}
+            {!loadingNew && newArrivals.length === 0 && (
+                <section className="section" style={{ background: 'var(--clr-bg-2)' }}>
+                    <div className="container text-center" style={{ padding: 'var(--sp-20) 0' }}>
+                        <div style={{ fontSize: 64, marginBottom: 16 }}>🛍️</div>
+                        <h2 className="section-title" style={{ marginBottom: 12 }}>Your Store is Ready!</h2>
+                        <p className="text-muted" style={{ marginBottom: 24 }}>Sign in as admin and add products to start selling.</p>
+                        <Link to="/login" className="btn btn-primary btn-lg">Go to Admin Panel</Link>
                     </div>
-                    <div className="grid-4 grid" style={{ gap: 'var(--sp-6)' }}>
-                        {featured.map(p => <ProductCard key={p.id} product={p} />)}
-                    </div>
-                </div>
-            </section>
+                </section>
+            )}
 
             {/* ── PROMO BANNER ── */}
             <section className="promo-banner">
@@ -134,21 +133,6 @@ export default function HomePage() {
                 </div>
             </section>
 
-            {/* ── TRENDING ── */}
-            <section className="section">
-                <div className="container">
-                    <div className="section-header flex items-center justify-between">
-                        <div>
-                            <h2 className="section-title"><TrendingUp size={28} style={{ display: 'inline-block', marginRight: 8, verticalAlign: 'middle', color: 'var(--clr-primary)' }} />Trending Now</h2>
-                            <p className="section-sub">Most loved pieces this season</p>
-                        </div>
-                    </div>
-                    <div className="grid-4 grid" style={{ gap: 'var(--sp-6)' }}>
-                        {trending.map(p => <ProductCard key={p.id} product={p} />)}
-                    </div>
-                </div>
-            </section>
-
             <style>{`
         .hero { position: relative; height: 88vh; min-height: 560px; max-height: 860px; background-size: cover; background-position: center; background-repeat: no-repeat; display: flex; align-items: center; transition: background-image 0.8s ease; }
         .hero-overlay { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 100%); }
@@ -163,11 +147,6 @@ export default function HomePage() {
         .benefits-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-1); padding: var(--sp-6) 0; }
         .benefit-item { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5); }
         .benefit-icon { width: 46px; height: 46px; border-radius: var(--r-md); background: rgba(192,132,252,0.1); border: 1px solid rgba(192,132,252,0.2); display: flex; align-items: center; justify-content: center; color: var(--clr-primary); flex-shrink: 0; }
-        .cat-card { position: relative; border-radius: var(--r-xl); overflow: hidden; aspect-ratio: 3/4; display: block; }
-        .cat-card img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
-        .cat-card:hover img { transform: scale(1.06); }
-        .cat-card__overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%); display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-end; padding: var(--sp-6); }
-        .cat-card__name { font-size: 26px; font-weight: 800; color: white; font-family: var(--font-serif); font-style: italic; }
         .promo-banner { background: linear-gradient(135deg, #0f0a1e 0%, #1a0836 50%, #0f0a1e 100%); border-top: 1px solid rgba(192,132,252,0.1); border-bottom: 1px solid rgba(192,132,252,0.1); padding: var(--sp-20) 0; }
         .promo-inner { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-16); align-items: center; }
         .promo-img { border-radius: var(--r-xl); overflow: hidden; box-shadow: var(--shadow-glow); }

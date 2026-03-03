@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Heart, Star, ChevronRight, Check, Minus, Plus } from 'lucide-react';
-import { mockProducts, mockReviews } from '../../data/mockData';
+import { useProduct, useReviews, submitReview } from '../../api/products';
 import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -25,7 +25,8 @@ function StarRating({ rating, interactive, onRate }) {
 export default function ProductDetailPage() {
     const { id } = useParams();
     const navigate = useNavigate();
-    const product = mockProducts.find(p => p.id === Number(id));
+    const { product, loading: productLoading } = useProduct(id);
+    const { reviews, refetch: refetchReviews } = useReviews(id);
 
     const { addToCart } = useCart();
     const { isFavorite, toggleFavorite, showToast } = useApp();
@@ -37,7 +38,12 @@ export default function ProductDetailPage() {
     const [qty, setQty] = useState(1);
     const [reviewText, setReviewText] = useState('');
     const [reviewRating, setReviewRating] = useState(0);
-    const [reviews, setReviews] = useState(mockReviews.filter(r => r.product_id === Number(id)));
+
+    if (productLoading) return (
+        <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
+            <p className="text-2xl">Loading...</p>
+        </div>
+    );
 
     if (!product) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
@@ -59,18 +65,22 @@ export default function ProductDetailPage() {
     const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : product.rating;
 
     const handleAddToCart = () => {
-        if (!selectedSize) { showToast('Please select a size', 'error'); return; }
+        if (!selectedSize && product.variants.length > 1) { showToast('Please select a size', 'error'); return; }
         addToCart(product, activeVariant, qty);
         showToast(`${product.name} added to cart!`);
     };
 
-    const submitReview = (e) => {
+    const handleSubmitReview = async (e) => {
         e.preventDefault();
         if (!reviewRating) { showToast('Please select a rating', 'error'); return; }
-        const newReview = { id: Date.now(), product_id: product.id, user_id: user?.user_ID || 1, user_name: user ? `${user.first_name} ${user.last_name[0]}.` : 'Guest', rating: reviewRating, comment: reviewText, review_date: new Date().toISOString().split('T')[0] };
-        setReviews(prev => [newReview, ...prev]);
-        setReviewText(''); setReviewRating(0);
-        showToast('Review submitted! Thank you.');
+        try {
+            await submitReview(id, { rating: reviewRating, comment: reviewText });
+            await refetchReviews();
+            setReviewText(''); setReviewRating(0);
+            showToast('Review submitted! Thank you.');
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
     };
 
     return (
@@ -187,7 +197,7 @@ export default function ProductDetailPage() {
                             </div>
                             {/* Write review */}
                             {user ? (
-                                <form onSubmit={submitReview} className="card card-body flex-col" style={{ gap: 14 }}>
+                                <form onSubmit={handleSubmitReview} className="card card-body flex-col" style={{ gap: 14 }}>
                                     <div className="font-semibold">Write a Review</div>
                                     <div className="form-group">
                                         <label className="form-label">Rating</label>

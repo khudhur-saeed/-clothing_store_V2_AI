@@ -17,7 +17,7 @@ def get_db():
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = decode_token(token)
-        user_id: int = payload.get("sub")
+        user_id = int(payload.get("sub"))  # cast to int: JWT may encode as string or int
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
     except JWTError:

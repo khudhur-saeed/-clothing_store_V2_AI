@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Trash2, ShoppingBag, ArrowRight, Tag, X } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
-import { mockCoupons } from '../../data/mockData';
+import { apiCall } from '../../api/client';
 import { useState } from 'react';
 
 export default function CartPage() {
@@ -11,12 +11,14 @@ export default function CartPage() {
     const [couponError, setCouponError] = useState('');
     const navigate = useNavigate();
 
-    const applyCoupon = () => {
-        const found = mockCoupons.find(c => c.coupon_code === couponInput.toUpperCase() && c.is_active);
-        if (!found) { setCouponError('Invalid or expired coupon code.'); return; }
-        if (found.expiration_date < new Date().toISOString().split('T')[0]) { setCouponError('This coupon has expired.'); return; }
-        if (cartTotal < found.min_order_amount) { setCouponError(`Minimum order $${found.min_order_amount} required.`); return; }
-        setCoupon(found); setCouponError('');
+    const applyCoupon = async () => {
+        setCouponError('');
+        try {
+            const found = await apiCall('/coupons/validate', {}, { code: couponInput.toUpperCase(), order_amount: cartTotal });
+            setCoupon(found); setCouponError('');
+        } catch (err) {
+            setCouponError(err.message || 'Invalid or expired coupon code.');
+        }
     };
 
     const discount = coupon ? (cartTotal * coupon.discount / 100) : 0;

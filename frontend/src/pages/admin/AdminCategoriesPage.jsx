@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { Plus, X, ChevronRight, FolderTree } from 'lucide-react';
-import { mockCategories } from '../../data/mockData';
 
 export default function AdminCategoriesPage() {
-    const [categories, setCategories] = useState(mockCategories);
+    const [categories, setCategories] = useState([]);
     const [form, setForm] = useState({ name: '', parent_id: '' });
     const [showForm, setShowForm] = useState(false);
 

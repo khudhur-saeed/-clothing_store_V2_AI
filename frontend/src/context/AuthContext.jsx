@@ -1,5 +1,5 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { mockUser, mockAdmin } from '../data/mockData';
+import { createContext, useContext, useState } from 'react';
+import { apiCall } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -8,37 +8,57 @@ export function AuthProvider({ children }) {
         try { return JSON.parse(localStorage.getItem('moda_user')); } catch { return null; }
     });
 
-    const login = (email, password) => {
-        // Mock authentication
-        if (email === mockAdmin.email) {
-            setUser(mockAdmin);
-            localStorage.setItem('moda_user', JSON.stringify(mockAdmin));
+    const login = async (email, password) => {
+        try {
+            // FastAPI expects query params for simple-type POST params
+            const data = await apiCall('/auth/login', { method: 'POST' }, { email, password });
+            localStorage.setItem('moda_token', data.access_token);
+            const profile = await apiCall('/auth/me');
+            setUser(profile);
+            localStorage.setItem('moda_user', JSON.stringify(profile));
             return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
         }
-        if (email && password.length >= 6) {
-            setUser(mockUser);
-            localStorage.setItem('moda_user', JSON.stringify(mockUser));
-            return { success: true };
-        }
-        return { success: false, error: 'Invalid email or password.' };
     };
 
-    const register = (data) => {
-        const newUser = { ...mockUser, first_name: data.firstName, last_name: data.lastName, email: data.email, phone_No: data.phone };
-        setUser(newUser);
-        localStorage.setItem('moda_user', JSON.stringify(newUser));
-        return { success: true };
+    const register = async (data) => {
+        try {
+            const res = await apiCall('/auth/register', { method: 'POST' }, {
+                first_name: data.firstName,
+                last_name: data.lastName,
+                email: data.email,
+                password: data.password,
+            });
+            localStorage.setItem('moda_token', res.access_token);
+            const profile = await apiCall('/auth/me');
+            setUser(profile);
+            localStorage.setItem('moda_user', JSON.stringify(profile));
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
     };
 
     const logout = () => {
         setUser(null);
         localStorage.removeItem('moda_user');
+        localStorage.removeItem('moda_token');
     };
 
-    const updateProfile = (data) => {
-        const updated = { ...user, ...data };
-        setUser(updated);
-        localStorage.setItem('moda_user', JSON.stringify(updated));
+    const updateProfile = async (data) => {
+        try {
+            const updated = await apiCall('/auth/me', { method: 'PUT' }, {
+                first_name: data.firstName || data.first_name,
+                last_name: data.lastName || data.last_name,
+                phone_no: data.phone || data.phone_no,
+            });
+            setUser(updated);
+            localStorage.setItem('moda_user', JSON.stringify(updated));
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
     };
 
     return (

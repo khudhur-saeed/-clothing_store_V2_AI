@@ -2,8 +2,16 @@ import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Bot, Plus, Minimize2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { botResponses } from '../../data/mockData';
 import { sendChatMessage } from '../../utils/geminiService';
+
+const BOT_REPLIES = [
+    "I'm here to help! What would you like to know?",
+    "Check out our latest products in the catalog! Free shipping on orders over $150.",
+    "For order tracking, go to My Orders in your account menu.",
+    "You can apply coupon codes at checkout for discounts.",
+    "Our return policy allows returns within 30 days of purchase.",
+    "Each product page has a size guide to help you pick the right fit.",
+];
 
 export default function FloatingChat() {
     const { conversations, sendMessage, addBotMessage, createConversation } = useApp();
@@ -46,10 +54,10 @@ export default function FloatingChat() {
             // Try real Gemini chat first
             const history = conv?.messages || [];
             const aiReply = await sendChatMessage(history, msg);
-            const reply = aiReply || botResponses[Math.floor(Math.random() * botResponses.length)];
+            const reply = aiReply || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
             addBotMessage(convId, reply);
         } catch {
-            addBotMessage(convId, botResponses[Math.floor(Math.random() * botResponses.length)]);
+            addBotMessage(convId, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)]);
         }
         setTyping(false);
     };

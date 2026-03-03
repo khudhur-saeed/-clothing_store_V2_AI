@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy.types import JSON
 from app.database import Base
 
 class ProductVariant(Base):
@@ -9,4 +10,4 @@ class ProductVariant(Base):
     color = Column(String(50), nullable=True)
     size = Column(String(20), nullable=True)
     stock = Column(Integer, default=0)
-    images = Column(Text, nullable=True)
+    images = Column(JSON, nullable=True, default=list)   # list of image URL strings

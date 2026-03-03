@@ -1,97 +1,154 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { mockAddresses, mockOutfits, mockConversations, mockOrders } from '../data/mockData';
+import { apiCall } from '../api/client';
 
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-    const [favorites, setFavorites] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('moda_favs')) || []; } catch { return []; }
-    });
-    const [addresses, setAddresses] = useState(mockAddresses);
-    const [outfits, setOutfits] = useState(mockOutfits);
-    const [orders, setOrders] = useState(mockOrders);
-    const [conversations, setConversations] = useState(mockConversations);
+    const [favorites, setFavorites] = useState([]);
+    const [addresses, setAddresses] = useState([]);
+    const [orders, setOrders] = useState([]);
+    // Outfits and conversations stay local for now
+    const [outfits, setOutfits] = useState([]);
+    const [conversations, setConversations] = useState([]);
     const [toast, setToast] = useState(null);
 
-    useEffect(() => {
-        localStorage.setItem('moda_favs', JSON.stringify(favorites));
-    }, [favorites]);
+    // Fetch data from API if logged in
+    const fetchUserData = async () => {
+        const token = localStorage.getItem('moda_token');
+        if (!token) return;
+        try {
+            const [favs, addrs, ords] = await Promise.all([
+                apiCall('/favorites/'),
+                apiCall('/addresses/'),
+                apiCall('/orders/'),
+            ]);
+            setFavorites(favs.map(f => f.product_id));
+            setAddresses(addrs);
+            setOrders(ords);
+        } catch (err) {
+            console.warn('Failed to fetch user data:', err.message);
+        }
+    };
 
-    const toggleFavorite = (productId) => {
-        setFavorites(prev =>
-            prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]
-        );
+    useEffect(() => {
+        fetchUserData();
+    }, []);
+
+    // --- Favorites ---
+    const toggleFavorite = async (productId) => {
+        const token = localStorage.getItem('moda_token');
+        const isAlreadyFav = favorites.includes(productId);
+        if (!token) {
+            setFavorites(prev => isAlreadyFav ? prev.filter(id => id !== productId) : [...prev, productId]);
+            return;
+        }
+        try {
+            if (isAlreadyFav) {
+                await apiCall(`/favorites/${productId}`, { method: 'DELETE' });
+                setFavorites(prev => prev.filter(id => id !== productId));
+            } else {
+                await apiCall(`/favorites/${productId}`, { method: 'POST' });
+                setFavorites(prev => [...prev, productId]);
+            }
+        } catch (err) {
+            console.error('Toggle favorite failed:', err.message);
+        }
     };
 
     const isFavorite = (productId) => favorites.includes(productId);
 
-    const showToast = (message, type = 'success') => {
-        setToast({ message, type });
-        setTimeout(() => setToast(null), 3000);
+    // --- Addresses ---
+    const addAddress = async (addr) => {
+        const token = localStorage.getItem('moda_token');
+        if (!token) return;
+        try {
+            const newAddr = await apiCall('/addresses/', { method: 'POST' }, {
+                street: addr.street,
+                city: addr.city,
+                country: addr.country,
+                zip_code: addr.zip_code,
+                is_default: addr.is_default || false,
+            });
+            setAddresses(prev => addr.is_default
+                ? [...prev.map(a => ({ ...a, is_default: false })), newAddr]
+                : [...prev, newAddr]);
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
     };
 
-    const addAddress = (addr) => {
-        const newAddr = { ...addr, address_id: Date.now(), user_id: 1 };
-        setAddresses(prev => {
-            if (addr.is_default) return [...prev.map(a => ({ ...a, is_default: false })), newAddr];
-            return [...prev, newAddr];
-        });
+    const deleteAddress = async (id) => {
+        try {
+            await apiCall(`/addresses/${id}`, { method: 'DELETE' });
+            setAddresses(prev => prev.filter(a => a.address_id !== id));
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
     };
 
-    const deleteAddress = (id) => setAddresses(prev => prev.filter(a => a.address_id !== id));
+    const setDefaultAddress = async (id) => {
+        try {
+            await apiCall(`/addresses/${id}/default`, { method: 'PUT' });
+            setAddresses(prev => prev.map(a => ({ ...a, is_default: a.address_id === id })));
+        } catch (err) {
+            showToast(err.message, 'error');
+        }
+    };
 
-    const setDefaultAddress = (id) => setAddresses(prev => prev.map(a => ({ ...a, is_default: a.address_id === id })));
+    // --- Orders ---
+    const placeOrder = async (orderData) => {
+        try {
+            const result = await apiCall('/orders/', { method: 'POST' }, {
+                address_id: orderData.address_id,
+                payment: orderData.payment || 'card',
+                coupon_code: orderData.coupon_code,
+            });
+            await fetchUserData(); // Refresh orders list
+            return result;
+        } catch (err) {
+            showToast(err.message, 'error');
+            throw err;
+        }
+    };
 
+    // --- Outfits (local) ---
     const createOutfit = (outfit) => {
-        setOutfits(prev => [...prev, { ...outfit, outfit_id: Date.now(), user_id: 1, created_at: new Date().toISOString().split('T')[0], products: [] }]);
+        setOutfits(prev => [...prev, { ...outfit, outfit_id: Date.now(), user_id: 1, products: [] }]);
     };
-
     const addToOutfit = (outfitId, productId) => {
         setOutfits(prev => prev.map(o => o.outfit_id === outfitId && !o.products.includes(productId)
-            ? { ...o, products: [...o.products, productId] } : o
-        ));
+            ? { ...o, products: [...o.products, productId] } : o));
     };
-
     const removeFromOutfit = (outfitId, productId) => {
         setOutfits(prev => prev.map(o => o.outfit_id === outfitId
-            ? { ...o, products: o.products.filter(id => id !== productId) } : o
-        ));
+            ? { ...o, products: o.products.filter(id => id !== productId) } : o));
     };
-
     const deleteOutfit = (outfitId) => setOutfits(prev => prev.filter(o => o.outfit_id !== outfitId));
 
-    const placeOrder = (orderData) => {
-        const newOrder = {
-            orderID: 1000 + orders.length + 1, ...orderData, order_date: new Date().toISOString(), status: 'processing', payment_status: 'completed',
-            shipping: { shippingID: Date.now(), shipping_status: 'processing', label: null, tracking: null, created_at: new Date().toISOString(), estimated_delivery: null, delivered_at: null },
-            invoice: { invoice_ID: Date.now(), invoice_date: new Date().toISOString().split('T')[0], total_amount: orderData.total_price, tax_amount: +(orderData.total_price * 0.18).toFixed(2), billing_address_id: orderData.address_id },
-        };
-        setOrders(prev => [newOrder, ...prev]);
-        return newOrder;
-    };
-
+    // --- Conversations (local) ---
     const sendMessage = (conversationId, content) => {
         setConversations(prev => prev.map(c => c.conversation_id === conversationId
             ? { ...c, messages: [...c.messages, { message_id: Date.now(), sender_type: 'user', content, sent_at: new Date().toISOString() }] }
-            : c
-        ));
+            : c));
     };
-
     const addBotMessage = (conversationId, content) => {
         setConversations(prev => prev.map(c => c.conversation_id === conversationId
             ? { ...c, messages: [...c.messages, { message_id: Date.now() + 1, sender_type: 'bot', content, sent_at: new Date().toISOString() }] }
-            : c
-        ));
+            : c));
     };
-
     const createConversation = (title = 'New conversation') => {
         const newConv = {
-            conversation_id: Date.now(), user_id: 1, title, started_at: new Date().toISOString(), messages: [
-                { message_id: 1, sender_type: 'bot', content: 'Hello! I\'m Moda Assistant. How can I help you today?', sent_at: new Date().toISOString() }
-            ]
+            conversation_id: Date.now(), user_id: 1, title, started_at: new Date().toISOString(),
+            messages: [{ message_id: 1, sender_type: 'bot', content: "Hello! I'm Moda Assistant. How can I help you today?", sent_at: new Date().toISOString() }]
         };
         setConversations(prev => [newConv, ...prev]);
         return newConv;
+    };
+
+    // --- Toast ---
+    const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3000);
     };
 
     return (
@@ -99,7 +156,7 @@ export function AppProvider({ children }) {
             favorites, toggleFavorite, isFavorite,
             addresses, addAddress, deleteAddress, setDefaultAddress,
             outfits, createOutfit, addToOutfit, removeFromOutfit, deleteOutfit,
-            orders, placeOrder,
+            orders, placeOrder, fetchUserData,
             conversations, sendMessage, addBotMessage, createConversation,
             toast, showToast,
         }}>

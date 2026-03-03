@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
-import { mockCategories, mockProducts } from '../../data/mockData';
+import { apiCall } from '../../api/client';
 
 export default function Header() {
     const { user, logout, isAdmin } = useAuth();
@@ -25,7 +25,7 @@ export default function Header() {
     const [scrolled, setScrolled] = useState(false);
     const searchRef = useRef(null);
 
-    const parentCats = mockCategories.filter(c => !c.parent_id);
+    // No static category nav — search navigates to catalog page
 
     useEffect(() => {
         const onScroll = () => setScrolled(window.scrollY > 20);
@@ -36,12 +36,20 @@ export default function Header() {
     useEffect(() => { setMenuOpen(false); setUserMenuOpen(false); }, [location]);
 
     useEffect(() => {
-        if (searchQuery.length > 1) {
-            setSearchResults(mockProducts.filter(p =>
-                p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                p.category.toLowerCase().includes(searchQuery.toLowerCase())
-            ).slice(0, 5));
-        } else setSearchResults([]);
+        if (searchQuery.length < 2) { setSearchResults([]); return; }
+        const timer = setTimeout(async () => {
+            try {
+                const data = await apiCall('/products/', {}, { search: searchQuery });
+                setSearchResults(data.slice(0, 5).map(p => ({
+                    id: p.product_id,
+                    name: p.name,
+                    category: p.category || '',
+                    price: Number(p.price) || 0,
+                    image: null,   // no thumbnail in list; handled gracefully
+                })));
+            } catch { setSearchResults([]); }
+        }, 300);
+        return () => clearTimeout(timer);
     }, [searchQuery]);
 
     useEffect(() => {
@@ -59,11 +67,9 @@ export default function Header() {
                     <span>MODA</span>
                 </Link>
 
-                {/* Nav */}
+                {/* Nav — just link to products and outfits */}
                 <nav className="header-nav desktop-only">
-                    {parentCats.map(cat => (
-                        <Link key={cat.id} to={`/products?category=${cat.id}`} className="nav-link">{cat.name}</Link>
-                    ))}
+                    <Link to="/products" className="nav-link">All Products</Link>
                     <Link to="/outfits" className="nav-link">Outfits</Link>
                 </nav>
 
@@ -86,12 +92,14 @@ export default function Header() {
                                         {searchResults.map(p => (
                                             <li key={p.id}>
                                                 <Link to={`/products/${p.id}`} className="search-result-item" onClick={() => setSearchOpen(false)}>
-                                                    <img src={p.images[0]?.url} alt={p.name} />
+                                                    {p.image
+                                                        ? <img src={p.image} alt={p.name} />
+                                                        : <div style={{ width: 40, height: 48, borderRadius: 'var(--r-sm)', background: 'var(--clr-surface-2)', flexShrink: 0 }} />}
                                                     <div>
                                                         <div className="font-medium text-sm">{p.name}</div>
                                                         <div className="text-xs text-faint">{p.category}</div>
                                                     </div>
-                                                    <div className="text-sm text-primary font-semibold">${p.variants[0]?.price.toFixed(2)}</div>
+                                                    <div className="text-sm text-primary font-semibold">${p.price.toFixed(2)}</div>
                                                 </Link>
                                             </li>
                                         ))}
@@ -171,9 +179,7 @@ export default function Header() {
             {/* Mobile Nav */}
             {menuOpen && (
                 <div className="mobile-nav animate-slideUp">
-                    {parentCats.map(cat => (
-                        <Link key={cat.id} to={`/products?category=${cat.id}`} className="mobile-nav-link">{cat.name}</Link>
-                    ))}
+                    <Link to="/products" className="mobile-nav-link">All Products</Link>
                     <Link to="/outfits" className="mobile-nav-link">Outfits</Link>
                     <Link to="/chat" className="mobile-nav-link">Chatbot</Link>
                     {user && <Link to="/profile" className="mobile-nav-link">My Profile</Link>}

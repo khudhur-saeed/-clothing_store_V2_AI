@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, Truck, Tag, FolderTree, LogOut, Shirt, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Truck, Tag, FolderTree, LogOut, Shirt, ChevronRight, LayoutTemplate } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const navItems = [
@@ -9,6 +9,7 @@ const navItems = [
     { to: '/admin/shipping', icon: Truck, label: 'Shipping' },
     { to: '/admin/coupons', icon: Tag, label: 'Coupons' },
     { to: '/admin/categories', icon: FolderTree, label: 'Categories' },
+    { to: '/admin/homepage', icon: LayoutTemplate, label: 'Homepage Editor' },
 ];
 
 export default function AdminLayout({ children, title }) {

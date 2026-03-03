@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { SlidersHorizontal, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { mockProducts, mockCategories } from '../../data/mockData';
+import { useProducts } from '../../api/products';
 import ProductCard from '../../components/ui/ProductCard';
 
 const pieceTypes = ['top', 'bottom', 'outerwear', 'footwear', 'accessory'];
@@ -39,25 +39,31 @@ export default function CatalogPage() {
 
     const clearAll = () => setSearchParams({});
 
-    const parents = mockCategories.filter(c => !c.parent_id);
     const toggle = k => setOpenSections(s => ({ ...s, [k]: !s[k] }));
 
-    const filtered = useMemo(() => {
-        let list = [...mockProducts];
-        if (query) list = list.filter(p => p.name.toLowerCase().includes(query.toLowerCase()) || p.category.toLowerCase().includes(query.toLowerCase()));
+    // Fetch from real API — pass search and category as params
+    const { products, loading } = useProducts({
+        ...(query ? { search: query } : {}),
+        ...(activeCat ? { category: activeCat } : {}),
+        ...(priceMax < 500 ? { max_price: priceMax } : {}),
+    });
 
-        if (activeCat) {
-            const children = mockCategories.filter(c => c.parent_id === activeCat).map(c => c.id);
-            list = list.filter(p => p.category_id === activeCat || children.includes(p.category_id));
-        }
+    // Build categories list from actual product data
+    const parents = useMemo(() => {
+        const cats = [...new Set(products.map(p => p.category).filter(Boolean))];
+        return cats.map((c) => ({ id: c, name: c }));
+    }, [products]);
+
+    const filtered = useMemo(() => {
+        let list = [...products];
         if (activePiece) list = list.filter(p => p.piece_type === activePiece);
         if (activeSize) list = list.filter(p => p.variants.some(v => v.size === activeSize));
-        list = list.filter(p => p.variants.some(v => v.price <= priceMax));
-        if (sortBy === 'price-asc') list.sort((a, b) => a.variants[0].price - b.variants[0].price);
-        if (sortBy === 'price-desc') list.sort((a, b) => b.variants[0].price - a.variants[0].price);
+        if (sortBy === 'price-asc') list.sort((a, b) => a.price - b.price);
+        if (sortBy === 'price-desc') list.sort((a, b) => b.price - a.price);
         if (sortBy === 'rating') list.sort((a, b) => b.rating - a.rating);
         return list;
-    }, [activeCat, activePiece, activeSize, sortBy, priceMax, query]);
+    }, [products, activePiece, activeSize, sortBy]);
+
 
     const Filters = () => (
         <div className="filters-panel">
@@ -159,6 +165,10 @@ export default function CatalogPage() {
                                 <p className="font-semibold">No products found</p>
                                 <p className="text-muted text-sm" style={{ marginTop: 6 }}>Try adjusting your filters or search term</p>
                                 <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={clearAll}>Clear Filters</button>
+                            </div>
+                        ) : loading ? (
+                            <div className="text-center" style={{ padding: 'var(--sp-20) 0' }}>
+                                <p className="text-muted">Loading products...</p>
                             </div>
                         ) : (
                             <div className="grid-3 grid" style={{ gap: 'var(--sp-5)' }}>

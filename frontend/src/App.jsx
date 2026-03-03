@@ -35,6 +35,7 @@ import AdminOrdersPage from './pages/admin/AdminOrdersPage';
 import AdminShippingPage from './pages/admin/AdminShippingPage';
 import AdminCouponsPage from './pages/admin/AdminCouponsPage';
 import AdminCategoriesPage from './pages/admin/AdminCategoriesPage';
+import AdminHomepagePage from './pages/admin/AdminHomepagePage';
 
 // Customer layout (with header, footer, and floating chat)
 function CustomerLayout() {
@@ -95,6 +96,7 @@ export default function App() {
                                     <Route path="/admin/shipping" element={<AdminShippingPage />} />
                                     <Route path="/admin/coupons" element={<AdminCouponsPage />} />
                                     <Route path="/admin/categories" element={<AdminCategoriesPage />} />
+                                    <Route path="/admin/homepage" element={<AdminHomepagePage />} />
                                 </Route>
 
                                 {/* Fallback */}
