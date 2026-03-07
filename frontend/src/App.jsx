@@ -32,6 +32,7 @@ import ChatbotPage from './pages/customer/ChatbotPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminProductsPage from './pages/admin/AdminProductsPage';
 import AdminOrdersPage from './pages/admin/AdminOrdersPage';
+import AdminOrderDetailPage from './pages/admin/AdminOrderDetailPage';
 import AdminShippingPage from './pages/admin/AdminShippingPage';
 import AdminCouponsPage from './pages/admin/AdminCouponsPage';
 import AdminCategoriesPage from './pages/admin/AdminCategoriesPage';
@@ -93,6 +94,7 @@ export default function App() {
                                     <Route path="/admin" element={<AdminDashboard />} />
                                     <Route path="/admin/products" element={<AdminProductsPage />} />
                                     <Route path="/admin/orders" element={<AdminOrdersPage />} />
+                                    <Route path="/admin/orders/:id" element={<AdminOrderDetailPage />} />
                                     <Route path="/admin/shipping" element={<AdminShippingPage />} />
                                     <Route path="/admin/coupons" element={<AdminCouponsPage />} />
                                     <Route path="/admin/categories" element={<AdminCategoriesPage />} />

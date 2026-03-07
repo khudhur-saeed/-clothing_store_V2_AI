@@ -38,6 +38,30 @@ export default function ProductDetailPage() {
     const [qty, setQty] = useState(1);
     const [reviewText, setReviewText] = useState('');
     const [reviewRating, setReviewRating] = useState(0);
+    const [related, setRelated] = useState([]);
+
+    // Fetch related products whenever the loaded product changes
+    // MUST be before any early returns (React rules of hooks)
+    useEffect(() => {
+        if (!product) return;
+        const fetchRelated = async () => {
+            try {
+                const data = await apiCall('/products/', {}, { category: product.category });
+                const others = data.filter(p => p.product_id !== product.product_id).slice(0, 4);
+                const withVariants = await Promise.all(
+                    others.map(async p => {
+                        try {
+                            const vs = await apiCall(`/products/${p.product_id}/variants`);
+                            const imgs = vs.flatMap(v => (v.images || []));
+                            return { ...p, id: p.product_id, images: imgs.length ? imgs.map(u => ({ url: u })) : [], rating: 0, variants: vs };
+                        } catch { return { ...p, id: p.product_id, images: [], rating: 0, variants: [] }; }
+                    })
+                );
+                setRelated(withVariants);
+            } catch { /* ignore */ }
+        };
+        fetchRelated();
+    }, [product?.id]);
 
     if (productLoading) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
@@ -61,7 +85,6 @@ export default function ProductDetailPage() {
         v => (selectedColor ? v.color === selectedColor : true) && (selectedSize ? v.size === selectedSize : true)
     ) || product.variants[0];
 
-    const related = mockProducts.filter(p => p.category_id === product.category_id && p.id !== product.id).slice(0, 4);
     const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : product.rating;
 
     const handleAddToCart = () => {

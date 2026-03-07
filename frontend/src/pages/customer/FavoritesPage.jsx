@@ -15,14 +15,22 @@ export default function FavoritesPage() {
         const token = localStorage.getItem('moda_token');
         if (!token) { setLoading(false); return; }
         try {
-            const data = await apiCall('/favorites/');
-            setFavProducts(data.map(f => ({
-                id: f.product_id,
-                name: f.name,
-                category: f.category || '',
-                price: Number(f.price) || 0,
-                image: null,  // variants needed for images
-            })));
+            const favs = await apiCall('/favorites/');
+            const products = await Promise.all(
+                favs.map(async f => {
+                    const p = await apiCall(`/products/${f.product_id}`).catch(() => null);
+                    if (!p) return null;
+                    // Fetch first variant to get an image
+                    let image = '';
+                    try {
+                        const variants = await apiCall(`/products/${f.product_id}/variants`);
+                        const imgs = variants?.[0]?.images;
+                        image = Array.isArray(imgs) ? (imgs[0] || '') : (imgs || '');
+                    } catch { /* no image */ }
+                    return { id: p.product_id, name: p.name, category: p.category || '', price: Number(p.price) || 0, image };
+                })
+            );
+            setFavProducts(products.filter(Boolean));
         } catch { setFavProducts([]); }
         finally { setLoading(false); }
     };

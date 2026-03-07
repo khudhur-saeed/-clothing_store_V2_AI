@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.dependencies import get_db, get_admin_user
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 
 router = APIRouter(prefix="/api/products", tags=["Products"])
 
@@ -67,6 +68,23 @@ def update_product(
     product = db.query(Product).filter(Product.product_id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    # Prevent activating a product that has no variants or variants without images
+    if status == "active":
+        variants = db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
+        if not variants:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot activate a product with no variants. Add at least one variant first."
+            )
+        for v in variants:
+            imgs = v.images  # stored as JSON list
+            if not imgs or (isinstance(imgs, list) and len(imgs) == 0):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"All variants must have at least one image before activation. Variant {v.variant_id} has no images."
+                )
+
     if name: product.name = name
     if price: product.price = price
     if description: product.description = description

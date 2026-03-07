@@ -4,13 +4,14 @@ from app.database import Base
 class Order(Base):
     __tablename__ = "orders"
 
-    orderid = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    address_id = Column(Integer, ForeignKey("addresses.address_id"), nullable=True)
-    order_date = Column(DateTime, nullable=True)
-    payment = Column(String(50), nullable=True)
+    orderid     = Column(Integer, primary_key=True, index=True)
+    user_id     = Column(Integer, ForeignKey("users.user_id"), nullable=False)
+    address_id  = Column(Integer, ForeignKey("addresses.address_id"), nullable=True)
+    order_date  = Column(DateTime, nullable=True)
+    payment     = Column(String(50), nullable=True)
     coupon_code = Column(String(50), ForeignKey("coupons.coupon_code"), nullable=True)
     total_price = Column(Numeric(10, 2), nullable=True)
+    status      = Column(String(50), nullable=True, default="processing")
 
 
 class OrderItem(Base):

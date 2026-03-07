@@ -75,8 +75,18 @@ export function useProducts(filters = {}) {
             try {
                 setLoading(true);
                 const data = await apiCall('/products/', {}, filters);
-                // Normalize each product (no variants in list view, use empty array)
-                setProducts(data.map(p => normalizeProduct(p, [])));
+                // Fetch variants for every product in parallel so we get real images
+                const withVariants = await Promise.all(
+                    data.map(async p => {
+                        try {
+                            const variants = await apiCall(`/products/${p.product_id}/variants`);
+                            return normalizeProduct(p, variants);
+                        } catch {
+                            return normalizeProduct(p, []);
+                        }
+                    })
+                );
+                setProducts(withVariants);
             } catch (err) {
                 setError(err.message);
             } finally {

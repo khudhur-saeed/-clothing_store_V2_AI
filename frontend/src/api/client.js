@@ -9,9 +9,12 @@ const BASE_URL = 'http://localhost:8000/api';
 export const apiCall = async (path, options = {}, params = {}) => {
     const token = localStorage.getItem('moda_token');
 
-    // Build query string from params object
-    const queryString = Object.keys(params).length
-        ? '?' + new URLSearchParams(params).toString()
+    // Build query string — skip null/undefined values
+    const cleanParams = Object.fromEntries(
+        Object.entries(params).filter(([, v]) => v != null)
+    );
+    const queryString = Object.keys(cleanParams).length
+        ? '?' + new URLSearchParams(cleanParams).toString()
         : '';
 
     const res = await fetch(`${BASE_URL}${path}${queryString}`, {
@@ -21,6 +24,19 @@ export const apiCall = async (path, options = {}, params = {}) => {
             ...options.headers,
         },
     });
+
+    // Token expired or invalid — clear session and redirect to login
+    if (res.status === 401) {
+        const err = await res.json().catch(() => ({ detail: 'Session expired' }));
+        const isAuthRoute = path.startsWith('/auth/login') || path.startsWith('/auth/register');
+        if (!isAuthRoute) {
+            localStorage.removeItem('moda_token');
+            localStorage.removeItem('moda_user');
+            // Reload sends the user to the login page (App.jsx guards routes)
+            window.location.href = '/login';
+        }
+        throw new Error(err.detail || 'Session expired. Please log in again.');
+    }
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Request failed' }));

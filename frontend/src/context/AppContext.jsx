@@ -98,11 +98,12 @@ export function AppProvider({ children }) {
     // --- Orders ---
     const placeOrder = async (orderData) => {
         try {
-            const result = await apiCall('/orders/', { method: 'POST' }, {
-                address_id: orderData.address_id,
-                payment: orderData.payment || 'card',
-                coupon_code: orderData.coupon_code,
-            });
+            // Only send defined, non-null params to avoid 422 errors
+            const params = { payment: orderData.payment || 'card' };
+            if (orderData.address_id != null) params.address_id = orderData.address_id;
+            if (orderData.coupon_code) params.coupon_code = orderData.coupon_code;
+
+            const result = await apiCall('/orders/', { method: 'POST' }, params);
             await fetchUserData(); // Refresh orders list
             return result;
         } catch (err) {

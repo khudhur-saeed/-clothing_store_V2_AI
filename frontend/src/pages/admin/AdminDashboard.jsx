@@ -15,7 +15,7 @@ export default function AdminDashboard() {
         setLoading(true);
         try {
             const [orders, products] = await Promise.all([
-                apiCall('/orders/all').catch(() => []),       // admin: all orders
+                apiCall('/orders/').catch(() => []),
                 apiCall('/products/').catch(() => []),
             ]);
             const revenue = orders.reduce((s, o) => s + Number(o.total_price || 0), 0);
@@ -79,12 +79,12 @@ export default function AdminDashboard() {
                                 <thead><tr><th>Order #</th><th>Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead>
                                 <tbody>
                                     {recentOrders.map(o => (
-                                        <tr key={o.order_id || o.orderID}>
-                                            <td className="font-semibold">#{o.order_id || o.orderID}</td>
+                                        <tr key={o.orderid}>
+                                            <td className="font-semibold">#{o.orderid}</td>
                                             <td className="text-sm text-muted">{new Date(o.order_date).toLocaleDateString()}</td>
                                             <td className="text-primary font-bold">${Number(o.total_price).toFixed(2)}</td>
                                             <td><span className={`badge badge-${statusColors[o.status] || 'muted'}`}>{o.status}</span></td>
-                                            <td><Link to={`/orders/${o.order_id || o.orderID}`} className="btn btn-ghost btn-sm">View</Link></td>
+                                            <td><Link to={`/orders/${o.orderid}`} className="btn btn-ghost btn-sm">View</Link></td>
                                         </tr>
                                     ))}
                                 </tbody>

@@ -53,12 +53,19 @@ export default function CheckoutPage() {
     const handlePlaceOrder = async () => {
         setLoading(true);
         await new Promise(r => setTimeout(r, 1200));
-        const order = placeOrder({
-            user_id: user.user_ID, address_id: selectedAddr, payment: payMethod,
-            coupon_code: coupon?.coupon_code || null, total_price: +total.toFixed(2),
-            items: cartItems.map(i => ({ variant_id: i.variantId, product_id: i.productId, product_name: i.productName, color: i.color, size: i.size, quantity: i.quantity, unit_price: i.price, image: i.image })),
-        });
-        clearCart(); setPlaced(order); setLoading(false);
+        try {
+            const result = await placeOrder({
+                address_id: selectedAddr,
+                payment: payMethod,
+                coupon_code: coupon?.coupon_code || null,
+            });
+            clearCart();
+            setPlaced(result);
+        } catch (err) {
+            showToast(err.message || 'Failed to place order', 'error');
+        } finally {
+            setLoading(false);
+        }
     };
 
     if (placed) return (
@@ -68,9 +75,9 @@ export default function CheckoutPage() {
             </div>
             <h1 className="text-3xl font-bold" style={{ marginBottom: 8 }}>Order Confirmed! 🎉</h1>
             <p className="text-muted" style={{ marginBottom: 4 }}>Thank you for your purchase.</p>
-            <p className="text-primary font-semibold">Order #{placed.orderID}</p>
+            <p className="text-primary font-semibold">Order #{placed.order_id}</p>
             <div className="flex gap-4 justify-center" style={{ marginTop: 32, flexWrap: 'wrap' }}>
-                <Link to={`/orders/${placed.orderID}`} className="btn btn-primary btn-lg">View Order <ChevronRight size={18} /></Link>
+                <Link to={`/orders/${placed.order_id}`} className="btn btn-primary btn-lg">View Order <ChevronRight size={18} /></Link>
                 <Link to="/products" className="btn btn-outline btn-lg">Continue Shopping</Link>
             </div>
         </div>
