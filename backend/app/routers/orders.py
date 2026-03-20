@@ -6,6 +6,7 @@ from app.models.order import Order, OrderItem
 from app.models.cart import ShoppingCart
 from app.models.product_variant import ProductVariant
 from app.models.product import Product
+from app.models.coupon import Coupon
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
@@ -23,12 +24,58 @@ def place_order(
     if not cart_items:
         raise HTTPException(status_code=400, detail="Cart is empty")
 
+    # Calculate prices
+    total_price = 0.0
+    order_items_data = []
+
+    for item in cart_items:
+        variant = db.query(ProductVariant).filter(ProductVariant.variant_id == item.variant_id).first()
+        if not variant:
+            continue
+            
+        product = db.query(Product).filter(Product.product_id == variant.product_id).first()
+        if not product:
+            continue
+            
+        unit_price = float(product.price)
+        item_total = unit_price * item.quantity
+        total_price += item_total
+        
+        order_items_data.append({
+            "variant_id": item.variant_id,
+            "quantity": item.quantity,
+            "unit_price": unit_price
+        })
+
+    subtotal = total_price
+    applied_coupon = None
+    
+    if coupon_code:
+        coupon = db.query(Coupon).filter(Coupon.coupon_code == coupon_code.upper()).first()
+        if not coupon or not getattr(coupon, 'is_active', True):
+            raise HTTPException(status_code=400, detail="Invalid or inactive coupon")
+            
+        if coupon.used_count >= coupon.usage_limit:
+            raise HTTPException(status_code=400, detail="Coupon usage limit reached")
+            
+        if subtotal < float(coupon.min_order_amount):
+            raise HTTPException(status_code=400, detail=f"Minimum order amount for this coupon is ${coupon.min_order_amount}")
+            
+        # Check if user already used this coupon
+        previous_use = db.query(Order).filter(Order.user_id == current_user.user_id, Order.coupon_code == coupon.coupon_code).first()
+        if previous_use:
+            raise HTTPException(status_code=400, detail="You have already used this coupon")
+
+        discount_val = float(coupon.discount) / 100.0
+        total_price = subtotal * (1.0 - discount_val)
+        applied_coupon = coupon
+
     order = Order(
         user_id=current_user.user_id,
         address_id=address_id,
         payment=payment,
-        coupon_code=coupon_code,
-        total_price=0,
+        coupon_code=coupon_code if applied_coupon else None,
+        total_price=total_price,
         status="processing",
         order_date=datetime.utcnow()
     )
@@ -36,14 +83,17 @@ def place_order(
     db.commit()
     db.refresh(order)
 
-    for item in cart_items:
+    for data in order_items_data:
         order_item = OrderItem(
             orderid=order.orderid,
-            variant_id=item.variant_id,
-            quantity=item.quantity,
-            unit_price=0
+            variant_id=data['variant_id'],
+            quantity=data['quantity'],
+            unit_price=data['unit_price']
         )
         db.add(order_item)
+
+    if applied_coupon:
+        applied_coupon.used_count += 1
 
     db.query(ShoppingCart).filter(ShoppingCart.user_id == current_user.user_id).delete()
     db.commit()
@@ -124,6 +174,7 @@ def _serialize_order(o):
         "order_date":  str(o.order_date) if o.order_date else None,
         "status":      o.status or "processing",
         "payment":     o.payment,
+        "coupon_code": o.coupon_code,
         "total_price": float(o.total_price) if o.total_price else 0.0,
         "address_id":  o.address_id,
     }

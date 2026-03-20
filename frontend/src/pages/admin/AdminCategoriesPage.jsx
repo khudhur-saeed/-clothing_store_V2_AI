@@ -1,22 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import AdminLayout from '../../components/layout/AdminLayout';
 import { Plus, X, ChevronRight, FolderTree } from 'lucide-react';
+import { apiCall } from '../../api/client';
 
 export default function AdminCategoriesPage() {
     const [categories, setCategories] = useState([]);
     const [form, setForm] = useState({ name: '', parent_id: '' });
     const [showForm, setShowForm] = useState(false);
 
+    useEffect(() => {
+        apiCall('/categories/').then(setCategories).catch(console.error);
+    }, []);
+
     const parents = categories.filter(c => !c.parent_id);
 
-    const handleAdd = () => {
+    const handleAdd = async () => {
         if (!form.name) return;
-        setCategories(prev => [...prev, { id: Date.now(), name: form.name, parent_id: form.parent_id ? Number(form.parent_id) : null }]);
-        setForm({ name: '', parent_id: '' }); setShowForm(false);
+        try {
+            const body = { name: form.name, parent_id: form.parent_id ? Number(form.parent_id) : null };
+            const newCat = await apiCall('/categories/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            setCategories(prev => [...prev, newCat]);
+            setForm({ name: '', parent_id: '' }); 
+            setShowForm(false);
+        } catch (e) {
+            alert(e.message || 'Failed to add category');
+        }
     };
 
-    const deleteCategory = (id) => {
-        setCategories(prev => prev.filter(c => c.id !== id && c.parent_id !== id));
+    const deleteCategory = async (id) => {
+        if (!window.confirm('Are you sure you want to delete this category? Subcategories will also be deleted.')) return;
+        try {
+            await apiCall(`/categories/${id}`, { method: 'DELETE' });
+            setCategories(prev => prev.filter(c => c.id !== id && c.parent_id !== id));
+        } catch (e) {
+            alert(e.message || 'Failed to delete category');
+        }
     };
 
     return (

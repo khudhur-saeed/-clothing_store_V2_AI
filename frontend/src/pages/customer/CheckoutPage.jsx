@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { Check, Plus, MapPin, CreditCard, Banknote, Truck, ChevronRight } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
@@ -9,6 +9,7 @@ import { apiCall } from '../../api/client';
 const STEPS = ['Delivery', 'Payment', 'Review'];
 
 export default function CheckoutPage() {
+    const location = useLocation();
     const { cartItems, cartTotal, clearCart } = useCart();
     const { addresses, addAddress, placeOrder, showToast } = useApp();
     const { user } = useAuth();
@@ -17,12 +18,20 @@ export default function CheckoutPage() {
     const [step, setStep] = useState(0);
     const [selectedAddr, setSelectedAddr] = useState(addresses.find(a => a.is_default)?.address_id || addresses[0]?.address_id);
     const [payMethod, setPayMethod] = useState('Credit Card');
-    const [couponCode, setCouponCode] = useState('');
+    const [couponCode, setCouponCode] = useState(location.state?.appliedCoupon || '');
     const [coupon, setCoupon] = useState(null);
     const [couponErr, setCouponErr] = useState('');
     const [newAddr, setNewAddr] = useState({ street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
     const [addingAddr, setAddingAddr] = useState(false);
     const [placed, setPlaced] = useState(null);
+
+    useEffect(() => {
+        if (location.state?.appliedCoupon && !coupon) {
+            apiCall('/coupons/validate', {}, { code: location.state.appliedCoupon.toUpperCase(), order_amount: cartTotal })
+                .then(setCoupon)
+                .catch(err => setCouponErr(err.message || 'Invalid coupon.'));
+        }
+    }, [location.state?.appliedCoupon, cartTotal]);
     const [loading, setLoading] = useState(false);
 
     if (!user) return (
@@ -135,7 +144,7 @@ export default function CheckoutPage() {
                                         <div className="flex items-start gap-3">
                                             <div className="step-num" style={{ marginTop: 2 }}>{selectedAddr === a.address_id ? <Check size={14} /> : <MapPin size={14} />}</div>
                                             <div style={{ flex: 1 }}>
-                                                <div className="font-semibold text-sm">{a.street}</div>
+                                                <div className="font-semibold text-sm">{a.title ? `${a.title} - ` : ''}{a.street}</div>
                                                 <div className="text-sm text-muted">{a.city}, {a.country} {a.zip_code}</div>
                                                 {a.is_default && <span className="badge badge-primary" style={{ marginTop: 4 }}>Default</span>}
                                             </div>
@@ -146,7 +155,10 @@ export default function CheckoutPage() {
                                     <button className="btn btn-outline btn-sm" style={{ marginTop: 12 }} onClick={() => setAddingAddr(true)}><Plus size={14} /> Add New Address</button>
                                 ) : (
                                     <div className="card card-body flex-col" style={{ gap: 12, marginTop: 12 }}>
-                                        <input className="form-input" placeholder="Street Address" value={newAddr.street} onChange={e => setNewAddr(p => ({ ...p, street: e.target.value }))} />
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+                                            <input className="form-input" placeholder="Title (e.g. Home)" value={newAddr.title || ''} onChange={e => setNewAddr(p => ({ ...p, title: e.target.value }))} />
+                                            <input className="form-input" placeholder="Street Address" value={newAddr.street} onChange={e => setNewAddr(p => ({ ...p, street: e.target.value }))} />
+                                        </div>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                                             <input className="form-input" placeholder="City" value={newAddr.city} onChange={e => setNewAddr(p => ({ ...p, city: e.target.value }))} />
                                             <input className="form-input" placeholder="Zip Code" value={newAddr.zip_code} onChange={e => setNewAddr(p => ({ ...p, zip_code: e.target.value }))} />

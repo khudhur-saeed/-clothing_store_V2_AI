@@ -1,11 +1,25 @@
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Printer, ArrowLeft, FileText } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { Printer, ArrowLeft, FileText, Loader2 } from 'lucide-react';
+import { apiCall } from '../../api/client';
 
 export default function InvoicePage() {
     const { id } = useParams();
-    const { orders } = useApp();
-    const order = orders.find(o => o.orderID === Number(id));
+    const [order, setOrder] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        apiCall(`/orders/${id}`)
+            .then(setOrder)
+            .catch(console.error)
+            .finally(() => setLoading(false));
+    }, [id]);
+
+    if (loading) return (
+        <div className="page container flex items-center justify-center p-20">
+            <Loader2 className="spinning" size={32} color="var(--clr-primary)" />
+        </div>
+    );
 
     if (!order) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
@@ -20,7 +34,7 @@ export default function InvoicePage() {
         <div className="page">
             <div className="container" style={{ maxWidth: 760 }}>
                 <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-6)' }}>
-                    <Link to={`/orders/${order.orderID}`} className="btn btn-ghost btn-sm"><ArrowLeft size={15} /> Back to Order</Link>
+                    <Link to={`/orders/${order.orderid}`} className="btn btn-ghost btn-sm"><ArrowLeft size={15} /> Back to Order</Link>
                     <button className="btn btn-primary btn-sm" onClick={() => window.print()} id="print-invoice-btn"><Printer size={14} /> Print Invoice</button>
                 </div>
 
@@ -37,7 +51,7 @@ export default function InvoicePage() {
                         </div>
                         <div className="text-right">
                             <div className="text-3xl font-bold" style={{ marginBottom: 4 }}>INVOICE</div>
-                            <div className="text-sm text-muted">#{invoice?.invoice_ID || order.orderID + 200}</div>
+                            <div className="text-sm text-muted">#{invoice?.invoice_id || order.orderid + 200}</div>
                             <div className="text-sm text-muted">Date: {invoice?.invoice_date || new Date(order.order_date).toLocaleDateString()}</div>
                         </div>
                     </div>
@@ -54,7 +68,7 @@ export default function InvoicePage() {
                         </div>
                         <div>
                             <div className="font-bold text-xs uppercase text-faint" style={{ marginBottom: 8 }}>Order Details</div>
-                            <div className="text-sm"><span className="text-muted">Order #:</span> <strong>{order.orderID}</strong></div>
+                            <div className="text-sm"><span className="text-muted">Order #:</span> <strong>{order.orderid}</strong></div>
                             <div className="text-sm"><span className="text-muted">Date:</span> {new Date(order.order_date).toLocaleDateString('en-GB')}</div>
                             <div className="text-sm"><span className="text-muted">Payment:</span> {order.payment}</div>
                         </div>
@@ -110,6 +124,7 @@ export default function InvoicePage() {
           .btn { display: none; }
           .invoice-doc { border: none; box-shadow: none; }
           body { background: white; color: black; }
+          header, footer, #floating-chat-btn, #floating-chat-panel, .floating-chat-btn, .floating-chat-panel { display: none !important; }
         }
         @media (max-width: 640px) { .invoice-header, .invoice-info { flex-direction: column; grid-template-columns: 1fr; gap: var(--sp-4); } }
       `}</style>

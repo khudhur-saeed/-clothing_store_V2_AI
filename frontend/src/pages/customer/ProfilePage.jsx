@@ -49,7 +49,9 @@ export default function ProfilePage() {
 
                 <div className="tabs" style={{ marginBottom: 'var(--sp-8)' }}>
                     <button className={`tab-btn${tab === 'info' ? ' active' : ''}`} onClick={() => setTab('info')}><User size={14} /> Personal Info</button>
-                    <button className={`tab-btn${tab === 'addr' ? ' active' : ''}`} onClick={() => setTab('addr')}><MapPin size={14} /> Addresses</button>
+                    {user.role !== 'admin' && (
+                        <button className={`tab-btn${tab === 'addr' ? ' active' : ''}`} onClick={() => setTab('addr')}><MapPin size={14} /> Addresses</button>
+                    )}
                     <button className={`tab-btn${tab === 'pw' ? ' active' : ''}`} onClick={() => setTab('pw')}><Lock size={14} /> Password</button>
                 </div>
 
@@ -99,7 +101,10 @@ export default function ProfilePage() {
                         {addingAddr && (
                             <div className="card card-body flex-col" style={{ gap: 14, marginBottom: 'var(--sp-5)' }}>
                                 <div className="font-semibold">New Address</div>
-                                <input className="form-input" placeholder="Street address" value={newAddr.street} onChange={e => setNewAddr(p => ({ ...p, street: e.target.value }))} id="new-addr-street" />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+                                    <input className="form-input" placeholder="Title (e.g. Home, Work)" value={newAddr.title || ''} onChange={e => setNewAddr(p => ({ ...p, title: e.target.value }))} id="new-addr-title" />
+                                    <input className="form-input" placeholder="Street address" value={newAddr.street} onChange={e => setNewAddr(p => ({ ...p, street: e.target.value }))} id="new-addr-street" />
+                                </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                                     <input className="form-input" placeholder="City" value={newAddr.city} onChange={e => setNewAddr(p => ({ ...p, city: e.target.value }))} id="new-addr-city" />
                                     <input className="form-input" placeholder="Zip Code" value={newAddr.zip_code} onChange={e => setNewAddr(p => ({ ...p, zip_code: e.target.value }))} />
@@ -122,7 +127,7 @@ export default function ProfilePage() {
                                 <div key={addr.address_id} className={`card card-body addr-card${addr.is_default ? ' default' : ''}`}>
                                     <div className="flex items-start justify-between">
                                         <div>
-                                            <div className="font-semibold">{addr.street}</div>
+                                            <div className="font-semibold">{addr.title ? `${addr.title} - ` : ''}{addr.street}</div>
                                             <div className="text-sm text-muted">{addr.city}, {addr.country} {addr.zip_code}</div>
                                             {addr.is_default && <span className="badge badge-primary" style={{ marginTop: 6 }}>Default</span>}
                                         </div>

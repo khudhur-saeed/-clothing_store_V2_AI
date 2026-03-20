@@ -8,14 +8,20 @@ export function AuthProvider({ children }) {
         try { return JSON.parse(localStorage.getItem('moda_user')); } catch { return null; }
     });
 
+    // Need AppContext to reset data on login/logout
+    // Since AppProvider wraps AuthProvider, we can't directly useApp here without a circular ref
+    // The easiest fix is for AppProvider to listen to localstorage or token changes, but we'll dispatch an event.
+
     const login = async (email, password) => {
         try {
-            // FastAPI expects query params for simple-type POST params
             const data = await apiCall('/auth/login', { method: 'POST' }, { email, password });
             localStorage.setItem('moda_token', data.access_token);
             const profile = await apiCall('/auth/me');
             setUser(profile);
             localStorage.setItem('moda_user', JSON.stringify(profile));
+
+            // Notify AppContext to refresh data
+            window.dispatchEvent(new Event('moda_auth_change'));
             return { success: true };
         } catch (err) {
             return { success: false, error: err.message };
@@ -34,6 +40,8 @@ export function AuthProvider({ children }) {
             const profile = await apiCall('/auth/me');
             setUser(profile);
             localStorage.setItem('moda_user', JSON.stringify(profile));
+
+            window.dispatchEvent(new Event('moda_auth_change'));
             return { success: true };
         } catch (err) {
             return { success: false, error: err.message };
@@ -44,6 +52,7 @@ export function AuthProvider({ children }) {
         setUser(null);
         localStorage.removeItem('moda_user');
         localStorage.removeItem('moda_token');
+        window.dispatchEvent(new Event('moda_auth_change'));
     };
 
     const updateProfile = async (data) => {

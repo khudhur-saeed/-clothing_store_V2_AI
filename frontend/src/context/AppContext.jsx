@@ -12,6 +12,12 @@ export function AppProvider({ children }) {
     const [conversations, setConversations] = useState([]);
     const [toast, setToast] = useState(null);
 
+    const clearUserData = () => {
+        setFavorites([]);
+        setAddresses([]);
+        setOrders([]);
+    };
+
     // Fetch data from API if logged in
     const fetchUserData = async () => {
         const token = localStorage.getItem('moda_token');
@@ -32,6 +38,18 @@ export function AppProvider({ children }) {
 
     useEffect(() => {
         fetchUserData();
+
+        const handleAuthChange = () => {
+            const token = localStorage.getItem('moda_token');
+            if (!token) {
+                clearUserData();
+            } else {
+                fetchUserData();
+            }
+        };
+
+        window.addEventListener('moda_auth_change', handleAuthChange);
+        return () => window.removeEventListener('moda_auth_change', handleAuthChange);
     }, []);
 
     // --- Favorites ---
@@ -63,6 +81,7 @@ export function AppProvider({ children }) {
         if (!token) return;
         try {
             const newAddr = await apiCall('/addresses/', { method: 'POST' }, {
+                title: addr.title,
                 street: addr.street,
                 city: addr.city,
                 country: addr.country,
@@ -157,7 +176,7 @@ export function AppProvider({ children }) {
             favorites, toggleFavorite, isFavorite,
             addresses, addAddress, deleteAddress, setDefaultAddress,
             outfits, createOutfit, addToOutfit, removeFromOutfit, deleteOutfit,
-            orders, placeOrder, fetchUserData,
+            orders, placeOrder, fetchUserData, clearUserData,
             conversations, sendMessage, addBotMessage, createConversation,
             toast, showToast,
         }}>

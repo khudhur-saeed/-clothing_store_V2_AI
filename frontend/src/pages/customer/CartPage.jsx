@@ -109,7 +109,7 @@ export default function CartPage() {
                             <div className="divider" style={{ margin: '4px 0' }} />
                             <div className="flex justify-between"><span className="font-bold text-lg">Total</span><span className="font-bold text-xl text-primary">${total.toFixed(2)}</span></div>
 
-                            <button id="checkout-btn" className="btn btn-primary btn-lg w-full" style={{ marginTop: 8 }} onClick={() => navigate('/checkout')}>
+                            <button id="checkout-btn" className="btn btn-primary btn-lg w-full" style={{ marginTop: 8 }} onClick={() => navigate('/checkout', { state: { appliedCoupon: coupon?.coupon_code || '' } })}>
                                 Proceed to Checkout <ArrowRight size={18} />
                             </button>
                             <Link to="/products" className="btn btn-ghost w-full text-center text-sm">Continue Shopping</Link>

@@ -25,6 +25,15 @@ export default function AdminOrderDetailPage() {
                 const data = await apiCall(`/orders/${id}`);
                 setOrder(data);
                 setSelectedStatus(data.status || 'processing');
+
+                if (data.address_id) {
+                    try {
+                        const addrData = await apiCall(`/addresses/${data.address_id}/admin`);
+                        setOrder(prev => ({ ...prev, address_data: addrData }));
+                    } catch (e) {
+                        // ignore address fetch errors
+                    }
+                }
             } catch (err) {
                 setError(err.message || 'Failed to load order');
             } finally {
@@ -37,7 +46,7 @@ export default function AdminOrderDetailPage() {
     const handleUpdateStatus = async () => {
         setSavingStatus(true);
         try {
-            await apiCall(`/orders/${id}/status`, { method: 'PUT' }, { payment: selectedStatus });
+            await apiCall(`/orders/${id}/status`, { method: 'PUT' }, { status: selectedStatus });
             setOrder(prev => ({ ...prev, status: selectedStatus }));
             showToast(`Order status updated to "${selectedStatus}"`);
         } catch (err) {
@@ -172,7 +181,19 @@ export default function AdminOrderDetailPage() {
                             <MapPin size={15} color="var(--clr-primary)" />
                             <h3 className="font-bold">Delivery Address</h3>
                         </div>
-                        <p className="text-sm text-muted">{order.address_id ? `Address #${order.address_id}` : 'No address recorded'}</p>
+                        {order.address_data ? (
+                            <div className="text-sm">
+                                <div className="font-semibold" style={{ marginBottom: 4 }}>
+                                    {order.address_data.title ? `${order.address_data.title} - ` : ''}
+                                    {order.address_data.street}
+                                </div>
+                                <div className="text-muted">
+                                    {order.address_data.city}, {order.address_data.country} {order.address_data.zip_code}
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-muted">{order.address_id ? `Address #${order.address_id}` : 'No address recorded'}</p>
+                        )}
                     </div>
 
                     {/* Summary */}
@@ -181,6 +202,12 @@ export default function AdminOrderDetailPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                             <div className="flex justify-between text-sm"><span className="text-muted">Subtotal</span><span>${totalPrice.toFixed(2)}</span></div>
                             <div className="flex justify-between text-sm"><span className="text-muted">Shipping</span><span className="text-success">FREE</span></div>
+                            {order.coupon_code && (
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-muted">Coupon Code</span>
+                                    <span className="badge badge-primary" style={{ fontSize: 11, padding: '2px 6px', textTransform: 'uppercase' }}>{order.coupon_code}</span>
+                                </div>
+                            )}
                             <div className="divider" style={{ margin: '4px 0' }} />
                             <div className="flex justify-between font-bold"><span>Total</span><span className="text-primary">${totalPrice.toFixed(2)}</span></div>
                         </div>

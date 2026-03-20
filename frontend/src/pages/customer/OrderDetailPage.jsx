@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Package, Truck, MapPin, CreditCard, FileText, ArrowLeft } from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { useApp } from '../../context/AppContext';
 
 const trackingSteps = [
     { key: 'processing', label: 'Order Placed', desc: 'Your order is being processed' },
@@ -15,6 +16,7 @@ const statusLabels = { processing: 'Processing', shipped: 'Shipped', delivered: 
 
 export default function OrderDetailPage() {
     const { id } = useParams();
+    const { addresses } = useApp();
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -51,6 +53,8 @@ export default function OrderDetailPage() {
     const trackIdx = shippingOrder.indexOf(order.status || 'processing');
     const activeTrkIdx = trackIdx === -1 ? 0 : trackIdx;
     const totalPrice = Number(order.total_price) || 0;
+    const subtotal = order.items ? order.items.reduce((sum, item) => sum + (Number(item.unit_price) * item.quantity), 0) : 0;
+    const discount = subtotal - totalPrice;
 
     return (
         <div className="page">
@@ -143,9 +147,25 @@ export default function OrderDetailPage() {
                                 <MapPin size={16} color="var(--clr-primary)" />
                                 <h3 className="font-bold">Delivery Address</h3>
                             </div>
-                            <p className="text-sm text-muted">
-                                {order.address_id ? `Address #${order.address_id}` : 'No address recorded'}
-                            </p>
+                            <div className="text-sm">
+                                {(() => {
+                                    if (!order.address_id) return <span className="text-muted">No address recorded</span>;
+                                    const addr = addresses.find(a => a.address_id === order.address_id);
+                                    if (addr) {
+                                        return (
+                                            <>
+                                                <div className="font-semibold" style={{ display: 'block', color: 'var(--clr-text)', marginBottom: 4 }}>
+                                                    {addr.title ? `${addr.title} - ` : ''}{addr.street}
+                                                </div>
+                                                <div className="text-muted">
+                                                    {addr.city}, {addr.country} {addr.zip_code}
+                                                </div>
+                                            </>
+                                        );
+                                    }
+                                    return <span className="text-muted">Address #{order.address_id}</span>;
+                                })()}
+                            </div>
                         </div>
 
                         {/* Payment */}
@@ -161,8 +181,14 @@ export default function OrderDetailPage() {
                         <div className="card card-body">
                             <h3 className="font-bold" style={{ marginBottom: 'var(--sp-4)' }}>Summary</h3>
                             <div className="flex-col" style={{ gap: 8 }}>
-                                <div className="flex justify-between text-sm"><span className="text-muted">Subtotal</span><span>${totalPrice.toFixed(2)}</span></div>
+                                <div className="flex justify-between text-sm"><span className="text-muted">Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
                                 <div className="flex justify-between text-sm"><span className="text-muted">Shipping</span><span className="text-success">FREE</span></div>
+                                {order.coupon_code && (
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted">Discount ({order.coupon_code.toUpperCase()})</span>
+                                        <span className="text-primary">{discount > 0 ? `-$${discount.toFixed(2)}` : '$0.00'}</span>
+                                    </div>
+                                )}
                                 <div className="divider" style={{ margin: '4px 0' }} />
                                 <div className="flex justify-between font-bold"><span>Total</span><span className="text-primary">${totalPrice.toFixed(2)}</span></div>
                             </div>

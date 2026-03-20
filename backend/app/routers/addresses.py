@@ -15,6 +15,7 @@ def get_addresses(current_user=Depends(get_current_user), db: Session = Depends(
 def add_address(
     street: str,
     city: str,
+    title: str = None,
     country: str = None,
     zip_code: str = None,
     is_default: bool = False,
@@ -27,6 +28,7 @@ def add_address(
 
     address = Address(
         user_id=current_user.user_id,
+        title=title,
         street=street,
         city=city,
         country=country,
@@ -72,3 +74,19 @@ def delete_address(
     db.delete(address)
     db.commit()
     return {"message": "Address deleted"}
+
+
+@router.get("/{address_id}/admin")
+def get_address_admin(
+    address_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_user) # simple check for now, assumes role is handled
+):
+    is_admin = getattr(admin, 'role', None) == 'admin'
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    address = db.query(Address).filter(Address.address_id == address_id).first()
+    if not address:
+        raise HTTPException(status_code=404, detail="Address not found")
+    return address
