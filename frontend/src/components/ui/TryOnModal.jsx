@@ -44,6 +44,10 @@ export default function TryOnModal({ product, onClose }) {
         } catch (err) {
             if (err.message === 'GEMINI_API_KEY_MISSING') {
                 setError('⚠️ Gemini API key not set. Add your key to the .env file (VITE_GEMINI_API_KEY).');
+            } else if (err.message?.includes('429') || err.message?.includes('quota') || err.message?.toLowerCase().includes('exceeded')) {
+                setError('⚠️ AI quota exceeded. The Virtual Try-On feature requires a paid Gemini API plan. Enable billing at aistudio.google.com to use this feature.');
+            } else if (err.message?.includes('403')) {
+                setError('⚠️ API key does not have permission. Make sure billing is enabled at aistudio.google.com.');
             } else {
                 setError(`AI error: ${err.message}`);
             }

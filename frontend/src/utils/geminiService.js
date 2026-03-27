@@ -43,9 +43,9 @@ export async function virtualTryOn(userPhotoFile, productImageUrl, productName) 
 
     const genAI = new GoogleGenerativeAI(API_KEY);
 
-    // gemini-2.0-flash-exp supports image output
+    // gemini-2.5-flash-image (Nano Banana) is the current image generation model
     const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash-exp-image-generation',
+        model: 'gemini-2.5-flash-image',
         generationConfig: {
             responseModalities: ['image', 'text'],
         },
@@ -82,26 +82,48 @@ Please generate a photorealistic image showing the SAME person from the first im
 
 /**
  * Send a text chat message to Gemini for the store chatbot.
+ * Returns { text, products } where products is an optional array of product cards.
  */
-export async function sendChatMessage(history, userMessage) {
+export async function sendChatMessage(history, userMessage, products = []) {
     if (!API_KEY || API_KEY === 'your_gemini_api_key_here') {
-        // Fallback to mock responses when no key is set
         return null;
     }
 
     const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    const systemContext = `You are "Moda Assistant", a helpful customer service chatbot for MODA, a premium fashion e-commerce store.
+    // Build a product catalog summary for the AI to reference
+    const productCatalog = products.slice(0, 60).map(p => ({
+        id: p.product_id,
+        name: p.name,
+        category: p.category,
+        price: p.price,
+        image: p.images?.find(i => i.is_primary)?.url || p.images?.[0]?.url || '',
+        description: p.description || '',
+    }));
+
+    const systemContext = `You are "Moda Assistant", a helpful and stylish customer service chatbot for MODA, a premium fashion e-commerce store.
 You help customers with: finding products, sizing advice, order tracking, returns, styling tips, and promotions.
-Be friendly, concise, and fashion-forward. Keep responses under 3 sentences unless a detailed answer is needed.
+Be friendly, concise, and fashion-forward. Use **bold** for emphasis and bullet points with - for lists when helpful.
+
+STORE CATALOG (use this to recommend real products):
+${JSON.stringify(productCatalog, null, 2)}
+
+IMPORTANT INSTRUCTIONS FOR PRODUCT RECOMMENDATIONS:
+- When a user asks about products, recommendations, or anything you can match to products in the catalog, include a product recommendation section.
+- At the END of your response, if you have product recommendations, add this special block (never inside the text):
+PRODUCTS_JSON::[{"id":1,"name":"Product Name","price":29.99,"image":"url","category":"Women"}]
+- Only include PRODUCTS_JSON if you have relevant product matches from the catalog above.
+- The PRODUCTS_JSON must be a valid JSON array. Use only products from the catalog.
+- If no products match, do NOT include the PRODUCTS_JSON line.
+
 Available coupon codes: SAVE10 (10% off $50+), WELCOME20 (20% off $80+), MODA15 (15% off $100+).
 Shipping is free on orders over $150. Returns accepted within 30 days.`;
 
     const chat = model.startChat({
         history: [
             { role: 'user', parts: [{ text: systemContext }] },
-            { role: 'model', parts: [{ text: 'Understood! I\'m ready to help MODA customers.' }] },
+            { role: 'model', parts: [{ text: 'Understood! I\'m Moda Assistant, ready to help with style advice and product recommendations.' }] },
             ...history.map(m => ({
                 role: m.sender_type === 'user' ? 'user' : 'model',
                 parts: [{ text: m.content }],
@@ -110,5 +132,20 @@ Shipping is free on orders over $150. Returns accepted within 30 days.`;
     });
 
     const result = await chat.sendMessage(userMessage);
-    return result.response.text();
+    const raw = result.response.text();
+
+    // Parse out PRODUCTS_JSON block if present
+    const productsMatch = raw.match(/PRODUCTS_JSON::(\[[\s\S]*?\])/);
+    let recommendedProducts = [];
+    let text = raw;
+
+    if (productsMatch) {
+        try {
+            recommendedProducts = JSON.parse(productsMatch[1]);
+        } catch { /* invalid JSON, ignore */ }
+        text = raw.replace(/PRODUCTS_JSON::\[[\s\S]*?\]/, '').trim();
+    }
+
+    return { text, products: recommendedProducts };
 }
+
