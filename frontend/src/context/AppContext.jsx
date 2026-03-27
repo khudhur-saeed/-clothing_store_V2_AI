@@ -151,9 +151,9 @@ export function AppProvider({ children }) {
             ? { ...c, messages: [...c.messages, { message_id: Date.now(), sender_type: 'user', content, sent_at: new Date().toISOString() }] }
             : c));
     };
-    const addBotMessage = (conversationId, content) => {
+    const addBotMessage = (conversationId, content, products = []) => {
         setConversations(prev => prev.map(c => c.conversation_id === conversationId
-            ? { ...c, messages: [...c.messages, { message_id: Date.now() + 1, sender_type: 'bot', content, sent_at: new Date().toISOString() }] }
+            ? { ...c, messages: [...c.messages, { message_id: Date.now() + 1, sender_type: 'bot', content, products, sent_at: new Date().toISOString() }] }
             : c));
     };
     const createConversation = (title = 'New conversation') => {
