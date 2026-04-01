@@ -9,19 +9,35 @@ const BASE_URL = 'http://localhost:8000/api';
 export const apiCall = async (path, options = {}, params = {}) => {
     const token = localStorage.getItem('moda_token');
 
-    // Build query string — skip null/undefined values
-    const cleanParams = Object.fromEntries(
-        Object.entries(params).filter(([, v]) => v != null)
-    );
-    const queryString = Object.keys(cleanParams).length
-        ? '?' + new URLSearchParams(cleanParams).toString()
-        : '';
+    // For POST/PUT/PATCH, send params as JSON body
+    const method = (options.method || 'GET').toUpperCase();
+    const isBodyRequest = ['POST', 'PUT', 'PATCH'].includes(method);
+
+    let finalOptions = { ...options };
+    let queryString = '';
+
+    if (isBodyRequest && Object.keys(params).length > 0) {
+        // Send as JSON body for POST/PUT/PATCH
+        finalOptions.body = JSON.stringify(params);
+        finalOptions.headers = {
+            'Content-Type': 'application/json',
+            ...finalOptions.headers,
+        };
+    } else if (!isBodyRequest && Object.keys(params).length > 0) {
+        // Build query string for GET/DELETE
+        const cleanParams = Object.fromEntries(
+            Object.entries(params).filter(([, v]) => v != null)
+        );
+        queryString = Object.keys(cleanParams).length
+            ? '?' + new URLSearchParams(cleanParams).toString()
+            : '';
+    }
 
     const res = await fetch(`${BASE_URL}${path}${queryString}`, {
-        ...options,
+        ...finalOptions,
         headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...options.headers,
+            ...finalOptions.headers,
         },
     });
 

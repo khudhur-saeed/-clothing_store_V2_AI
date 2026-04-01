@@ -19,11 +19,13 @@ export default function Header() {
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const [outfitMenuOpen, setOutfitMenuOpen] = useState(false);
     const [searchOpen, setSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [scrolled, setScrolled] = useState(false);
     const searchRef = useRef(null);
+    const outfitMenuRef = useRef(null);
 
     // No static category nav — search navigates to catalog page
 
@@ -33,7 +35,7 @@ export default function Header() {
         return () => window.removeEventListener('scroll', onScroll);
     }, []);
 
-    useEffect(() => { setMenuOpen(false); setUserMenuOpen(false); }, [location]);
+    useEffect(() => { setMenuOpen(false); setUserMenuOpen(false); setOutfitMenuOpen(false); }, [location]);
 
     useEffect(() => {
         if (searchQuery.length < 2) { setSearchResults([]); return; }
@@ -58,6 +60,16 @@ export default function Header() {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    useEffect(() => {
+        const handler = (e) => {
+            if (outfitMenuRef.current && !outfitMenuRef.current.contains(e.target)) {
+                setOutfitMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
     return (
         <header className={`header${scrolled ? ' scrolled' : ''}`}>
             <div className="container header-inner">
@@ -70,7 +82,18 @@ export default function Header() {
                 {/* Nav — just link to products and outfits */}
                 <nav className="header-nav desktop-only">
                     <Link to="/products" className="nav-link">All Products</Link>
-                    <Link to="/outfits" className="nav-link">Outfits</Link>
+                    <div className="outfit-nav-wrap" ref={outfitMenuRef}>
+                        <button className="nav-link outfit-nav-btn" onClick={() => setOutfitMenuOpen(v => !v)}>
+                            Outfits <ChevronDown size={14} className={outfitMenuOpen ? 'rotated' : ''} />
+                        </button>
+                        {outfitMenuOpen && (
+                            <div className="outfit-nav-dropdown animate-slideUp">
+                                <Link to="/outfits?section=my" className="dropdown-item">My Outfits</Link>
+                                <Link to="/outfits?section=community" className="dropdown-item">Community Outfits</Link>
+                                <Link to="/outfits?section=create" className="dropdown-item">Create / Edit Outfit</Link>
+                            </div>
+                        )}
+                    </div>
                 </nav>
 
                 {/* Actions */}
@@ -180,7 +203,9 @@ export default function Header() {
             {menuOpen && (
                 <div className="mobile-nav animate-slideUp">
                     <Link to="/products" className="mobile-nav-link">All Products</Link>
-                    <Link to="/outfits" className="mobile-nav-link">Outfits</Link>
+                    <Link to="/outfits?section=my" className="mobile-nav-link">My Outfits</Link>
+                    <Link to="/outfits?section=community" className="mobile-nav-link">Community Outfits</Link>
+                    <Link to="/outfits?section=create" className="mobile-nav-link">Create / Edit Outfit</Link>
                     <Link to="/chat" className="mobile-nav-link">Chatbot</Link>
                     {user && <Link to="/profile" className="mobile-nav-link">My Profile</Link>}
                     {user && <Link to="/orders" className="mobile-nav-link">My Orders</Link>}
@@ -200,6 +225,20 @@ export default function Header() {
         .header-nav { display: flex; align-items: center; gap: var(--sp-5); flex: 1; justify-content: center; }
         .nav-link { font-size: 12px; font-weight: 600; color: var(--clr-text-2); transition: color var(--tr-fast); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 2px; border-bottom: 2px solid transparent; }
         .nav-link:hover { color: var(--clr-primary); border-bottom-color: var(--clr-primary); }
+                .outfit-nav-wrap { position: relative; }
+                .outfit-nav-btn { display: flex; align-items: center; gap: 4px; background: transparent; border: none; cursor: pointer; }
+                .outfit-nav-dropdown {
+                    position: absolute;
+                    top: calc(100% + 10px);
+                    left: 0;
+                    min-width: 190px;
+                    background: var(--clr-surface);
+                    border: 1px solid var(--clr-border-2);
+                    border-radius: var(--r-lg);
+                    box-shadow: var(--shadow-lg);
+                    overflow: hidden;
+                    z-index: 210;
+                }
         .header-actions { display: flex; align-items: center; gap: var(--sp-2); flex-shrink: 0; }
         .icon-btn { position: relative; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--clr-text-2); transition: all var(--tr-fast); }
         .icon-btn:hover { background: var(--clr-surface-2); color: var(--clr-text); }
@@ -220,6 +259,7 @@ export default function Header() {
         .user-btn { display: flex; align-items: center; gap: 6px; background: var(--clr-surface); border: 1px solid var(--clr-border); border-radius: var(--r-full); padding: 4px 10px 4px 4px; cursor: pointer; transition: all var(--tr-fast); }
         .user-btn:hover { border-color: var(--clr-primary); box-shadow: 0 0 0 2px rgba(168,85,247,0.15); }
         .user-btn .rotated { transform: rotate(180deg); transition: transform var(--tr-fast); }
+        .rotated { transform: rotate(180deg); transition: transform var(--tr-fast); }
         .user-avatar { width: 30px; height: 30px; border-radius: 50%; background: linear-gradient(135deg, var(--clr-primary), var(--clr-accent)); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: white; }
         .user-dropdown { position: absolute; top: calc(100% + 10px); right: 0; width: 220px; background: var(--clr-surface); border: 1px solid var(--clr-border-2); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); overflow: hidden; z-index: 200; }
         .user-dropdown-header { padding: var(--sp-4) var(--sp-4) var(--sp-3); border-bottom: 1px solid var(--clr-border); }

@@ -2,20 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session 
 from app.dependencies import get_db, get_current_user
 from app.models.user import User
-from app.core.security import hash_password, verify_password,create_access_token
+from app.core.security import hash_password, verify_password, create_access_token
+from app.schemas.user import UserLogin, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 @router.post("/register")
-def register(first_name: str,last_name: str, email: str, password: str, db:Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == email).first()
+def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == user_data.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail= "Email already registed")
+        raise HTTPException(status_code=400, detail="Email already registed")
     
-    new_user = User(first_name=first_name, 
-        last_name=last_name,
-        email=email,
-        password=hash_password(password),
+    new_user = User(
+        first_name=user_data.first_name, 
+        last_name=user_data.last_name,
+        email=user_data.email,
+        password=hash_password(user_data.password),
         role="customer"
     )
 
@@ -27,9 +29,9 @@ def register(first_name: str,last_name: str, email: str, password: str, db:Sessi
     return {"access_token": token, "token_type": "bearer"}
 
 @router.post("/login")
-def login(email: str, password: str, db:Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(password, user.password):
+def login(user_data: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == user_data.email).first()
+    if not user or not verify_password(user_data.password, user.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     token = create_access_token({"sub": str(user.user_id)})
@@ -50,15 +52,16 @@ def get_me(current_user=Depends(get_current_user)):
 
 @router.put("/me")
 def update_me(
-    first_name: str = None,
-    last_name: str = None,
-    phone_no: str = None,
+    update_data: UserUpdate,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if first_name: current_user.first_name = first_name
-    if last_name: current_user.last_name = last_name
-    if phone_no: current_user.phone_no = phone_no
+    if update_data.first_name: current_user.first_name = update_data.first_name
+    if update_data.last_name: current_user.last_name = update_data.last_name
+    if update_data.phone_no: current_user.phone_no = update_data.phone_no
+    if update_data.password:
+        current_user.password = hash_password(update_data.password)
+    
     db.commit()
     db.refresh(current_user)
     return {

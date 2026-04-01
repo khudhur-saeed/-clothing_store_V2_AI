@@ -1,12 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, Truck, Tag, FolderTree, LogOut, Shirt, ChevronRight, LayoutTemplate, Users } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Truck, Tag, FolderTree, LogOut, Shirt, ChevronRight, LayoutTemplate } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const navItems = [
     { to: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/admin/products', icon: Package, label: 'Products' },
     { to: '/admin/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/admin/users', icon: Users, label: 'Users' },
     { to: '/admin/shipping', icon: Truck, label: 'Shipping' },
     { to: '/admin/coupons', icon: Tag, label: 'Coupons' },
     { to: '/admin/categories', icon: FolderTree, label: 'Categories' },

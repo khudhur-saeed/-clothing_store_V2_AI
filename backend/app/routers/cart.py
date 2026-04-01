@@ -15,17 +15,20 @@ def get_cart(current_user=Depends(get_current_user), db: Session = Depends(get_d
     for item in items:
         variant = db.query(ProductVariant).filter(ProductVariant.variant_id == item.variant_id).first()
         product = db.query(Product).filter(Product.product_id == variant.product_id).first() if variant else None
-        result.append({
-            "variant_id":  item.variant_id,
-            "product_id":  variant.product_id if variant else None,
-            "name":        product.name if product else "Unknown Product",
-            "price":       float(product.price) if product and product.price else 0.0,
-            "color":       variant.color if variant else "",
-            "size":        variant.size  if variant else "",
-            "stock":       variant.stock if variant else 0,
-            "images":      variant.images if variant else [],
-            "quantity":    item.quantity,
-        })
+        
+        # Only include items from active products
+        if product and product.status == 'active':
+            result.append({
+                "variant_id":  item.variant_id,
+                "product_id":  variant.product_id if variant else None,
+                "name":        product.name if product else "Unknown Product",
+                "price":       float(product.price) if product and product.price else 0.0,
+                "color":       variant.color if variant else "",
+                "size":        variant.size  if variant else "",
+                "stock":       variant.stock if variant else 0,
+                "images":      variant.images if variant else [],
+                "quantity":    item.quantity,
+            })
     return result
 
 
@@ -40,6 +43,11 @@ def add_to_cart(
     variant = db.query(ProductVariant).filter(ProductVariant.variant_id == variant_id).first()
     if not variant:
         raise HTTPException(status_code=404, detail="Product variant not found")
+    
+    # Check if product is active
+    product = db.query(Product).filter(Product.product_id == variant.product_id).first()
+    if not product or product.status != 'active':
+        raise HTTPException(status_code=404, detail="Product not available")
 
     # If already in cart, increase quantity
     existing = db.query(ShoppingCart).filter(

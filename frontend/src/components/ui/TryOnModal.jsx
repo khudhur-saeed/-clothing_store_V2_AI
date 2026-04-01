@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { X, Upload, Sparkles, Download, RefreshCw, AlertCircle, Camera, Info } from 'lucide-react';
-import { virtualTryOn } from '../../utils/geminiService';
+import { virtualTryOn, virtualTryOnDemo } from '../../utils/geminiService';
 
 export default function TryOnModal({ product, onClose }) {
     const [userPhoto, setUserPhoto] = useState(null);      // File
@@ -44,10 +44,14 @@ export default function TryOnModal({ product, onClose }) {
         } catch (err) {
             if (err.message === 'GEMINI_API_KEY_MISSING') {
                 setError('⚠️ Gemini API key not set. Add your key to the .env file (VITE_GEMINI_API_KEY).');
-            } else if (err.message?.includes('429') || err.message?.includes('quota') || err.message?.toLowerCase().includes('exceeded')) {
-                setError('⚠️ AI quota exceeded. The Virtual Try-On feature requires a paid Gemini API plan. Enable billing at aistudio.google.com to use this feature.');
-            } else if (err.message?.includes('403')) {
-                setError('⚠️ API key does not have permission. Make sure billing is enabled at aistudio.google.com.');
+            } else if (err.message?.startsWith('GEMINI_QUOTA_EXCEEDED:')) {
+                try {
+                    const demoBase64 = await virtualTryOnDemo(userPhoto, productImg, product.name);
+                    setResult(demoBase64);
+                    setError('⚠️ Gemini quota exceeded. Showing a local demo preview instead.');
+                } catch {
+                    setError('⚠️ Gemini quota exceeded for this API key. Wait a minute and retry, or switch to a billed/another key.');
+                }
             } else {
                 setError(`AI error: ${err.message}`);
             }

@@ -3,12 +3,20 @@ from sqlalchemy.orm import Session
 from datetime import date
 from app.dependencies import get_db, get_current_user
 from app.models.review import Review
+from app.models.product import Product
 
 router = APIRouter(prefix="/api/products", tags=["Reviews"])
 
 
 @router.get("/{product_id}/reviews")
 def get_reviews(product_id: int, db: Session = Depends(get_db)):
+    # Check if product exists and is active
+    product = db.query(Product).filter(Product.product_id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.status != 'active':
+        raise HTTPException(status_code=404, detail="Product not found")
+    
     return db.query(Review).filter(Review.product_id == product_id).all()
 
 
@@ -20,6 +28,13 @@ def add_review(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Check if product exists and is active
+    product = db.query(Product).filter(Product.product_id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.status != 'active':
+        raise HTTPException(status_code=404, detail="Product not found")
+    
     if rating < 1 or rating > 5:
         raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
     review = Review(

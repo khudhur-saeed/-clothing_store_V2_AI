@@ -7,21 +7,20 @@ import { apiCall } from '../../api/client';
 const statusColors = { processing: 'info', shipped: 'warning', delivered: 'success', cancelled: 'error' };
 
 export default function AdminDashboard() {
-    const [stats, setStats] = useState({ revenue: 0, orders: 0, pending: 0, products: 0, users: 0 });
+    const [stats, setStats] = useState({ revenue: 0, orders: 0, pending: 0, products: 0 });
     const [recentOrders, setRecentOrders] = useState([]);
     const [loading, setLoading] = useState(true);
 
     const fetchStats = async () => {
         setLoading(true);
         try {
-            const [orders, products, users] = await Promise.all([
-                apiCall('/orders/all').catch(() => []),
+            const [orders, products] = await Promise.all([
+                apiCall('/orders/').catch(() => []),
                 apiCall('/products/').catch(() => []),
-                apiCall('/users/').catch(() => []),
             ]);
             const revenue = orders.reduce((s, o) => s + Number(o.total_price || 0), 0);
             const pending = orders.filter(o => o.status === 'processing').length;
-            setStats({ revenue, orders: orders.length, pending, products: products.length, users: users.length });
+            setStats({ revenue, orders: orders.length, pending, products: products.length });
             setRecentOrders(orders.slice(0, 5));
         } catch { /* ignore */ }
         finally { setLoading(false); }
@@ -30,10 +29,10 @@ export default function AdminDashboard() {
     useEffect(() => { fetchStats(); }, []);
 
     const statCards = [
-        { icon: DollarSign, label: 'Total Revenue', value: `$${stats.revenue.toFixed(2)}`, sub: 'All time', color: 'var(--clr-success)', link: null },
-        { icon: ShoppingCart, label: 'Total Orders', value: stats.orders, sub: `${stats.pending} pending`, color: 'var(--clr-primary)', link: '/admin/orders' },
-        { icon: Package, label: 'Products', value: stats.products, sub: 'In catalog', color: 'var(--clr-warning)', link: '/admin/products' },
-        { icon: Users, label: 'Registered Users', value: stats.users, sub: 'Total accounts', color: 'var(--clr-info)', link: '/admin/users' },
+        { icon: DollarSign, label: 'Total Revenue', value: `$${stats.revenue.toFixed(2)}`, sub: 'All time', color: 'var(--clr-success)' },
+        { icon: ShoppingCart, label: 'Total Orders', value: stats.orders, sub: `${stats.pending} pending`, color: 'var(--clr-primary)' },
+        { icon: Package, label: 'Products', value: stats.products, sub: 'In catalog', color: 'var(--clr-warning)' },
+        { icon: Users, label: 'Store Status', value: stats.products > 0 ? '🟢 Live' : '🟡 Setup', sub: stats.products > 0 ? 'Accepting orders' : 'Add products to start', color: 'var(--clr-info)' },
     ];
 
     return (
@@ -45,14 +44,14 @@ export default function AdminDashboard() {
 
                 {/* KPIs */}
                 <div className="grid-4 grid" style={{ gap: 'var(--sp-5)' }}>
-                    {statCards.map(({ icon: Icon, label, value, sub, color, link }) => (
+                    {statCards.map(({ icon: Icon, label, value, sub, color }) => (
                         <div key={label} className="card card-body" style={{ borderLeft: `3px solid ${color}` }}>
                             <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-3)' }}>
                                 <span className="text-sm text-muted font-medium uppercase" style={{ letterSpacing: '0.06em', fontSize: 11 }}>{label}</span>
                                 <Icon size={18} color={color} />
                             </div>
                             <div className="text-3xl font-bold" style={{ marginBottom: 4 }}>{loading ? '…' : value}</div>
-                            <div className="text-xs text-faint">{sub}{link && <Link to={link} style={{ marginLeft: 8, color: 'var(--clr-primary)' }}>View →</Link>}</div>
+                            <div className="text-xs text-faint">{sub}</div>
                         </div>
                     ))}
                 </div>
@@ -65,7 +64,6 @@ export default function AdminDashboard() {
                         <Link to="/admin/homepage" className="btn btn-outline">🏠 Edit Homepage</Link>
                         <Link to="/admin/coupons" className="btn btn-outline">🏷️ Manage Coupons</Link>
                         <Link to="/admin/orders" className="btn btn-outline">📦 View Orders</Link>
-                        <Link to="/admin/users" className="btn btn-outline"><Users size={15} /> View Users</Link>
                     </div>
                 </div>
 

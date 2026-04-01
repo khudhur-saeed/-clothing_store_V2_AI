@@ -42,8 +42,8 @@ def get_coupons(db: Session = Depends(get_db), admin=Depends(get_admin_user)):
             "discount":         float(c.discount) if c.discount else 0,
             "expiration_date":  str(c.expiration_date) if c.expiration_date else None,
             "min_order_amount": float(c.min_order_amount) if c.min_order_amount else 0,
-            "usage_limit":      c.usage_limit if c.usage_limit is not None else 100,
-            "used_count":       c.used_count if c.used_count is not None else 0,
+            "usage_limit":      c.usage_limit or 100,
+            "used_count":       c.used_count or 0,
             "is_active":        bool(c.is_active),
         }
         for c in coupons

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.dependencies import get_db, get_current_user
 from app.models.favorite import Favorite
+from app.models.product import Product
 
 router = APIRouter(prefix="/api/favorites", tags=["Favorites"])
 
@@ -17,6 +18,13 @@ def add_favorite(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Check if product exists and is active
+    product = db.query(Product).filter(Product.product_id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if product.status != 'active':
+        raise HTTPException(status_code=404, detail="Product not found")
+    
     existing = db.query(Favorite).filter(
         Favorite.user_id == current_user.user_id,
         Favorite.product_id == product_id

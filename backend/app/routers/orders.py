@@ -7,6 +7,7 @@ from app.models.cart import ShoppingCart
 from app.models.product_variant import ProductVariant
 from app.models.product import Product
 from app.models.coupon import Coupon
+from app.schemas.order import OrderStatusUpdate
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
@@ -154,16 +155,16 @@ def get_order(order_id: int, current_user=Depends(get_current_user), db: Session
 @router.put("/{order_id}/status")
 def update_order_status(
     order_id: int,
-    status: str,
+    payload: OrderStatusUpdate,
     db: Session = Depends(get_db),
     admin=Depends(get_admin_user)
 ):
     order = db.query(Order).filter(Order.orderid == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    order.status = status
+    order.status = payload.status
     db.commit()
-    return {"message": f"Order {order_id} status updated to '{status}'"}
+    return {"message": f"Order {order_id} status updated to '{payload.status}'"}
 
 
 # ── Shared serializer ─────────────────────────────────────────────────────

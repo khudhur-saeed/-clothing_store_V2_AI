@@ -6,7 +6,7 @@ import ProductCard from '../../components/ui/ProductCard';
 
 const DEFAULT_SLIDES = [
     { title: 'New Season', sub: 'Arrivals', tag: 'Spring/Summer 2026', cta: 'Shop Collection', img: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=1200&q=80', link: '/products' },
-    { title: 'Curated', sub: 'Outfits', tag: 'Build Your Look', cta: 'Create Outfit', img: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80', link: '/outfits' },
+    { title: 'Curated', sub: 'Outfits', tag: 'Build Your Look', cta: 'Create Outfit', img: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80', link: '/outfits?section=create' },
     { title: 'Premium', sub: 'Accessories', tag: 'Complete Your Style', cta: 'Shop Now', img: 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=1200&q=80', link: '/products' },
 ];
 
@@ -59,7 +59,7 @@ export default function HomePage() {
                         <Link to={s.link} className="btn btn-primary btn-lg" id="hero-cta">
                             {s.cta} <ArrowRight size={18} />
                         </Link>
-                        <Link to="/outfits" className="btn btn-outline btn-lg"><Sparkles size={18} /> Build Outfit</Link>
+                        <Link to="/outfits?section=create" className="btn btn-outline btn-lg"><Sparkles size={18} /> Build Outfit</Link>
                     </div>
                 </div>
                 <div className="hero-dots">
@@ -123,7 +123,7 @@ export default function HomePage() {
                         <span className="badge badge-primary" style={{ marginBottom: 12 }}><Sparkles size={12} /> Exclusive Offer</span>
                         <h2 className="section-title display" style={{ color: 'white' }}>Build Your <em>Perfect Outfit</em></h2>
                         <p style={{ color: 'rgba(255,255,255,0.7)', marginTop: 12, fontSize: 15 }}>Mix and match from thousands of pieces to create your signature look.</p>
-                        <Link to="/outfits" className="btn btn-primary btn-lg" style={{ marginTop: 28 }} id="promo-outfit-btn">
+                        <Link to="/outfits?section=create" className="btn btn-primary btn-lg" style={{ marginTop: 28 }} id="promo-outfit-btn">
                             Start Building <ArrowRight size={18} />
                         </Link>
                     </div>

@@ -23,7 +23,7 @@ import CheckoutPage from './pages/customer/CheckoutPage';
 import OrdersPage from './pages/customer/OrdersPage';
 import OrderDetailPage from './pages/customer/OrderDetailPage';
 import FavoritesPage from './pages/customer/FavoritesPage';
-import OutfitBuilderPage from './pages/customer/OutfitBuilderPage';
+import OutfitGalleryPage from './pages/customer/OutfitGalleryPage';
 import ProfilePage from './pages/customer/ProfilePage';
 import InvoicePage from './pages/customer/InvoicePage';
 import ChatbotPage from './pages/customer/ChatbotPage';
@@ -37,7 +37,6 @@ import AdminShippingPage from './pages/admin/AdminShippingPage';
 import AdminCouponsPage from './pages/admin/AdminCouponsPage';
 import AdminCategoriesPage from './pages/admin/AdminCategoriesPage';
 import AdminHomepagePage from './pages/admin/AdminHomepagePage';
-import AdminUsersPage from './pages/admin/AdminUsersPage';
 
 // Customer layout (with header, footer, and floating chat)
 function CustomerLayout() {
@@ -85,7 +84,9 @@ export default function App() {
                                     <Route path="/orders/:id" element={<OrderDetailPage />} />
                                     <Route path="/orders/:id/invoice" element={<InvoicePage />} />
                                     <Route path="/favorites" element={<FavoritesPage />} />
-                                    <Route path="/outfits" element={<OutfitBuilderPage />} />
+                                    <Route path="/outfits" element={<OutfitGalleryPage />} />
+                                    <Route path="/outfits/builder" element={<Navigate to="/outfits?section=create" replace />} />
+                                    <Route path="/outfit-gallery" element={<Navigate to="/outfits?section=community" replace />} />
                                     <Route path="/profile" element={<ProfilePage />} />
                                     <Route path="/chat" element={<ChatbotPage />} />
                                 </Route>
@@ -100,7 +101,6 @@ export default function App() {
                                     <Route path="/admin/coupons" element={<AdminCouponsPage />} />
                                     <Route path="/admin/categories" element={<AdminCategoriesPage />} />
                                     <Route path="/admin/homepage" element={<AdminHomepagePage />} />
-                                    <Route path="/admin/users" element={<AdminUsersPage />} />
                                 </Route>
 
                                 {/* Fallback */}
