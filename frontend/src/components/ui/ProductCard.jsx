@@ -26,6 +26,7 @@ export default function ProductCard({ product }) {
     const fav = isFavorite(product.id);
     const primaryVariant = product.variants[0];
     const primaryImage = product.images.find(i => i.is_primary)?.url || product.images[0]?.url;
+    const displayPrice = Number(primaryVariant?.price ?? product.price ?? 0).toFixed(2);
 
     const handleAddToCart = (e) => {
         e.preventDefault(); e.stopPropagation();
@@ -89,7 +90,7 @@ export default function ProductCard({ product }) {
                     <div className="product-card__name">{product.name}</div>
                     <StarRating rating={product.rating} count={product.review_count} />
                     <div className="flex items-center justify-between" style={{ marginTop: 8 }}>
-                        <span className="product-card__price">${primaryVariant?.price.toFixed(2)}</span>
+                        <span className="product-card__price">${displayPrice}</span>
                         {/* Mini Try-On button always visible below price */}
                         <button
                             className="tryon-mini-btn"

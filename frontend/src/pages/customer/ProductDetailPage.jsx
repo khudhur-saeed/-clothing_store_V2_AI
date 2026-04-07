@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ShoppingBag, Heart, Star, ChevronRight, Check, Minus, Plus } from 'lucide-react';
 import { useProduct, useReviews, submitReview } from '../../api/products';
+import { apiCall } from '../../api/client';
 import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -20,6 +21,74 @@ function StarRating({ rating, interactive, onRate }) {
             ))}
         </div>
     );
+}
+
+function normalizeImages(images) {
+    if (!images) return [];
+    if (Array.isArray(images)) {
+        return images
+            .map((img) => (typeof img === 'string' ? img : img?.url))
+            .filter(Boolean)
+            .map((url) => ({ url }));
+    }
+    return [];
+}
+
+function normalizeColorVariants(variants, fallbackPrice) {
+    const grouped = new Map();
+
+    (variants || []).forEach((variant) => {
+        const color = variant?.color || '#888888';
+        const colorName = variant?.color_name || variant?.color || 'Default';
+
+        if (!grouped.has(color)) {
+            grouped.set(color, {
+                color,
+                color_name: colorName,
+                images: normalizeImages(variant?.images),
+                sizeOptions: [],
+            });
+        }
+
+        const group = grouped.get(color);
+        const nestedOptions = Array.isArray(variant?.size_options) ? variant.size_options : null;
+
+        if (nestedOptions && nestedOptions.length) {
+            nestedOptions.forEach((option, index) => {
+                group.sizeOptions.push({
+                    key: `${variant?.variant_id || color}-${option?.size || index}`,
+                    size: option?.size || 'One Size',
+                    stock: Number(option?.stock ?? 0),
+                    price: Number(option?.price ?? variant?.price ?? fallbackPrice ?? 0),
+                    variant_id: option?.size_option_id || variant?.variant_id || variant?.id,
+                });
+            });
+        } else {
+            group.sizeOptions.push({
+                key: `${variant?.variant_id || color}-${variant?.size || 'One Size'}`,
+                size: variant?.size || 'One Size',
+                stock: Number(variant?.stock ?? 0),
+                price: Number(variant?.price ?? fallbackPrice ?? 0),
+                variant_id: variant?.variant_id || variant?.id,
+            });
+        }
+
+        if (!group.images.length) {
+            group.images = normalizeImages(variant?.images);
+        }
+    });
+
+    return Array.from(grouped.values()).map((group) => {
+        const seen = new Set();
+        const deduped = [];
+        group.sizeOptions.forEach((option) => {
+            const token = String(option.size || '').toLowerCase();
+            if (seen.has(token)) return;
+            seen.add(token);
+            deduped.push(option);
+        });
+        return { ...group, sizeOptions: deduped };
+    });
 }
 
 export default function ProductDetailPage() {
@@ -63,6 +132,28 @@ export default function ProductDetailPage() {
         fetchRelated();
     }, [product?.id]);
 
+    const colorVariants = useMemo(
+        () => normalizeColorVariants(product?.variants || [], product?.price || 0),
+        [product?.variants, product?.price]
+    );
+
+    useEffect(() => {
+        if (!colorVariants.length) return;
+        if (!selectedColor || !colorVariants.some((variant) => variant.color === selectedColor)) {
+            setSelectedColor(colorVariants[0].color);
+            setSelectedSize(null);
+        }
+    }, [colorVariants, selectedColor]);
+
+    useEffect(() => {
+        if (!selectedColor) return;
+        const group = colorVariants.find((variant) => variant.color === selectedColor);
+        if (!group) return;
+        if (selectedSize && !group.sizeOptions.some((option) => option.size === selectedSize)) {
+            setSelectedSize(null);
+        }
+    }, [selectedColor, selectedSize, colorVariants]);
+
     if (productLoading) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
             <p className="text-2xl">Loading...</p>
@@ -76,19 +167,32 @@ export default function ProductDetailPage() {
         </div>
     );
 
-    const colors = [...new Map(product.variants.map(v => [v.color, v])).values()];
-    const sizesForColor = selectedColor
-        ? product.variants.filter(v => v.color === selectedColor).map(v => v.size)
-        : product.variants.map(v => v.size);
+    const colors = colorVariants;
+    const selectedColorGroup = colors.find((variant) => variant.color === selectedColor) || colors[0] || null;
+    const sizesForColor = selectedColorGroup?.sizeOptions || [];
 
-    const activeVariant = product.variants.find(
-        v => (selectedColor ? v.color === selectedColor : true) && (selectedSize ? v.size === selectedSize : true)
-    ) || product.variants[0];
+    const activeSizeOption =
+        sizesForColor.find((option) => option.size === selectedSize) ||
+        sizesForColor[0] ||
+        null;
 
-    const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : product.rating;
+    const activeVariant = activeSizeOption
+        ? {
+            color: selectedColorGroup?.color,
+            color_name: selectedColorGroup?.color_name,
+            size: activeSizeOption.size,
+            stock: activeSizeOption.stock,
+            price: activeSizeOption.price,
+            variant_id: activeSizeOption.variant_id,
+            images: selectedColorGroup?.images || [],
+        }
+        : null;
+
+    const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : (product.rating || 0);
 
     const handleAddToCart = () => {
-        if (!selectedSize && product.variants.length > 1) { showToast('Please select a size', 'error'); return; }
+        if (!selectedSize && sizesForColor.length > 1) { showToast('Please select a size', 'error'); return; }
+        if (!activeVariant || activeVariant.stock <= 0) { showToast('This variant is out of stock', 'error'); return; }
         addToCart(product, activeVariant, qty);
         showToast(`${product.name} added to cart!`);
     };
@@ -151,7 +255,7 @@ export default function ProductDetailPage() {
                         </div>
 
                         <div className="pd-price">
-                            <span className="text-3xl font-bold text-primary">${activeVariant?.price.toFixed(2)}</span>
+                            <span className="text-3xl font-bold text-primary">${Number(activeVariant?.price ?? product.price ?? 0).toFixed(2)}</span>
                             {activeVariant?.stock < 5 && activeVariant?.stock > 0 && (
                                 <span className="badge badge-warning" style={{ marginLeft: 12 }}>Only {activeVariant.stock} left!</span>
                             )}
@@ -175,13 +279,29 @@ export default function ProductDetailPage() {
                         {/* Size */}
                         <div className="form-group" style={{ marginBottom: 24 }}>
                             <label className="form-label">Size</label>
-                            <div className="size-btns">
-                                {[...new Set(sizesForColor)].map(s => {
-                                    const variant = product.variants.find(v => v.size === s && (selectedColor ? v.color === selectedColor : true));
+                            <div className="pd-size-grid flex gap-3 flex-wrap">
+                                {sizesForColor.length === 0 && (
+                                    <span className="text-sm text-muted">No sizes available for this color.</span>
+                                )}
+
+                                {sizesForColor.map((option) => {
+                                    const isOutOfStock = option?.stock == null || Number(option.stock) <= 0;
+                                    const isSelected = selectedSize === option.size;
+
                                     return (
-                                        <button key={s} className={`size-btn${selectedSize === s ? ' active' : ''}${!variant || variant.stock === 0 ? ' out-of-stock' : ''}`}
-                                            disabled={!variant || variant.stock === 0}
-                                            onClick={() => setSelectedSize(sz => sz === s ? null : s)}>{s}</button>
+                                        <button
+                                            key={option.key}
+                                            type="button"
+                                            disabled={isOutOfStock}
+                                            onClick={() => setSelectedSize(option.size)}
+                                            className={`pd-size-chip${isSelected ? ' is-selected' : ''}${isOutOfStock ? ' is-disabled' : ''}`}
+                                            style={isOutOfStock ? {
+                                                backgroundImage: 'linear-gradient(to top right, transparent calc(50% - 1px), #9ca3af calc(50%), transparent calc(50% + 1px))',
+                                            } : undefined}
+                                            aria-label={`Size ${option.size}${isOutOfStock ? ' unavailable' : ''}`}
+                                        >
+                                            <span>{option.size}</span>
+                                        </button>
                                     );
                                 })}
                             </div>
@@ -207,55 +327,69 @@ export default function ProductDetailPage() {
                 </div>
 
                 {/* Reviews */}
-                <div className="divider" style={{ margin: 'var(--sp-16) 0 var(--sp-10)' }} />
-                <div className="reviews-section">
-                    <h2 className="text-2xl font-bold" style={{ marginBottom: 'var(--sp-8)' }}>Customer Reviews</h2>
-                    <div className="reviews-grid">
-                        <div>
-                            {/* Review summary */}
-                            <div className="review-summary card card-body" style={{ marginBottom: 'var(--sp-6)' }}>
-                                <div className="text-5xl font-bold text-primary text-center">{avgRating}</div>
-                                <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}><StarRating rating={Number(avgRating)} /></div>
-                                <div className="text-center text-muted text-sm">{reviews.length} reviews</div>
+                <section className="pd-lower">
+                    <div className="pd-lower-head">
+                        <h2 className="text-2xl font-bold">Customer Reviews</h2>
+                        <span className="text-sm text-muted">{reviews.length} review{reviews.length === 1 ? '' : 's'}</span>
+                    </div>
+
+                    <div className="pd-lower-grid">
+                        <div className="pd-panel-col">
+                            <div className="pd-clean-card pd-score-card">
+                                <div className="pd-score-value">{avgRating}</div>
+                                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+                                    <StarRating rating={Number(avgRating)} />
+                                </div>
+                                <div className="text-sm" style={{ color: '#6B7280' }}>Based on {reviews.length} customer review{reviews.length === 1 ? '' : 's'}</div>
                             </div>
-                            {/* Write review */}
+
                             {user ? (
-                                <form onSubmit={handleSubmitReview} className="card card-body flex-col" style={{ gap: 14 }}>
-                                    <div className="font-semibold">Write a Review</div>
-                                    <div className="form-group">
+                                <form onSubmit={handleSubmitReview} className="pd-clean-card pd-review-form">
+                                    <div className="pd-card-title">Write a Review</div>
+                                    <div className="form-group" style={{ margin: 0 }}>
                                         <label className="form-label">Rating</label>
                                         <StarRating rating={reviewRating} interactive onRate={setReviewRating} />
                                     </div>
-                                    <div className="form-group">
+                                    <div className="form-group" style={{ margin: 0 }}>
                                         <label className="form-label">Comment</label>
-                                        <textarea className="form-textarea" placeholder="Share your experience…" value={reviewText} onChange={e => setReviewText(e.target.value)} required />
+                                        <textarea className="form-textarea" placeholder="Share your experience..." value={reviewText} onChange={e => setReviewText(e.target.value)} required />
                                     </div>
                                     <button type="submit" className="btn btn-primary w-full" id="submit-review-btn">Submit Review</button>
                                 </form>
                             ) : (
-                                <div className="card card-body text-center">
-                                    <p className="text-muted text-sm">You must be signed in to write a review.</p>
-                                    <Link to="/login" className="btn btn-primary btn-sm" style={{ marginTop: 12 }}>Sign In</Link>
+                                <div className="pd-clean-card pd-signin-card text-center">
+                                    <div className="pd-card-title">Want to leave a review?</div>
+                                    <p className="text-sm" style={{ color: '#6B7280' }}>You must be signed in to write a review.</p>
+                                    <Link to="/login" className="btn btn-primary btn-sm" style={{ marginTop: 10 }}>Sign In</Link>
                                 </div>
                             )}
                         </div>
-                        <div className="flex-col" style={{ gap: 'var(--sp-4)' }}>
-                            {reviews.length === 0 && <p className="text-muted">No reviews yet. Be the first!</p>}
+
+                        <div className="pd-reviews-list">
+                            {reviews.length === 0 && (
+                                <div className="pd-clean-card">
+                                    <p className="text-sm" style={{ color: '#6B7280' }}>No reviews yet. Be the first to share your opinion.</p>
+                                </div>
+                            )}
+
                             {reviews.map(r => (
-                                <div key={r.id} className="card card-body">
-                                    <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+                                <div key={r.id} className="pd-clean-card pd-review-item">
+                                    <div className="pd-review-top">
                                         <div className="flex items-center gap-3">
-                                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,var(--clr-primary),var(--clr-accent))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white' }}>{r.user_name[0]}</div>
-                                            <div><div className="font-semibold text-sm">{r.user_name}</div><div className="text-xs text-faint">{r.review_date}</div></div>
+                                            <div className="pd-avatar">{r.user_name?.[0] || 'U'}</div>
+                                            <div>
+                                                <div className="font-semibold text-sm" style={{ color: '#111827' }}>{r.user_name}</div>
+                                                <div className="text-xs" style={{ color: '#9CA3AF' }}>{r.review_date}</div>
+                                            </div>
                                         </div>
                                         <StarRating rating={r.rating} />
                                     </div>
-                                    <p className="text-sm text-muted" style={{ lineHeight: 1.7 }}>{r.comment}</p>
+                                    <p className="pd-review-text">{r.comment}</p>
                                 </div>
                             ))}
                         </div>
                     </div>
-                </div>
+                </section>
 
                 {/* Related */}
                 {related.length > 0 && (
@@ -269,7 +403,7 @@ export default function ProductDetailPage() {
             </div>
 
             <style>{`
-        .pd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-16); align-items: start; margin-bottom: var(--sp-12); }
+                .pd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-16); align-items: start; margin-bottom: var(--sp-16); }
         .pd-images { position: sticky; top: calc(var(--header-h) + 16px); }
         .pd-main-img { border-radius: var(--r-xl); overflow: hidden; position: relative; background: var(--clr-surface); aspect-ratio: 3/4; }
         .pd-main-img img { width: 100%; height: 100%; object-fit: cover; }
@@ -278,8 +412,91 @@ export default function ProductDetailPage() {
         .pd-thumb img { width: 100%; height: 100%; object-fit: cover; }
         .pd-thumb.active { border-color: var(--clr-primary); }
         .pd-price { margin-bottom: 20px; }
-        .reviews-grid { display: grid; grid-template-columns: 280px 1fr; gap: var(--sp-8); }
-        @media (max-width: 900px) { .pd-grid { grid-template-columns: 1fr; } .pd-images { position: static; } .reviews-grid { grid-template-columns: 1fr; } }
+
+                .pd-lower { margin-top: var(--sp-10); padding-top: var(--sp-8); border-top: 1px solid var(--clr-border); }
+                .pd-lower-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--sp-6); }
+                .pd-lower-grid { display: grid; grid-template-columns: 320px 1fr; gap: var(--sp-8); align-items: start; }
+                .pd-panel-col { display: grid; gap: var(--sp-4); }
+
+                .pd-clean-card {
+                    background: #FFFFFF;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 16px;
+                    padding: 18px;
+                    box-shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
+                }
+
+                .pd-score-card { text-align: center; }
+                .pd-score-value { font-size: 2.5rem; line-height: 1; font-weight: 800; color: #6D28D9; margin-bottom: 10px; }
+                .pd-card-title { font-weight: 700; color: #111827; margin-bottom: 8px; }
+                .pd-review-form { display: grid; gap: 14px; }
+                .pd-signin-card { display: grid; gap: 8px; }
+
+                .pd-reviews-list { display: grid; gap: var(--sp-4); }
+                .pd-review-item { padding: 16px 18px; }
+                .pd-review-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+                .pd-avatar {
+                    width: 38px;
+                    height: 38px;
+                    border-radius: 9999px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: 700;
+                    font-size: 13px;
+                    background: linear-gradient(135deg, #8B5CF6, #C084FC);
+                    color: #FFFFFF;
+                    flex-shrink: 0;
+                }
+                .pd-review-text { font-size: 0.92rem; line-height: 1.75; color: #4B5563; }
+
+                .pd-size-grid { margin-top: 8px; }
+                .pd-size-chip {
+                    min-width: 68px;
+                    height: 44px;
+                    padding: 0 14px;
+                    border-radius: 12px;
+                    border: 1px solid var(--clr-border-2);
+                    background-color: var(--glass-bg-heavy);
+                    color: var(--clr-text);
+                    font-size: 0.9rem;
+                    font-weight: 700;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all var(--tr-fast);
+                    position: relative;
+                    overflow: hidden;
+                }
+
+                .pd-size-chip:hover {
+                    border-color: var(--clr-primary);
+                    box-shadow: var(--shadow-glow-sm);
+                    transform: translateY(-1px);
+                }
+
+                .pd-size-chip.is-selected {
+                    background: var(--grad-primary);
+                    border-color: var(--clr-primary);
+                    color: var(--clr-text-inv);
+                    box-shadow: var(--shadow-glow-sm);
+                }
+
+                .pd-size-chip.is-disabled {
+                    cursor: not-allowed;
+                    opacity: 0.55;
+                    color: var(--clr-text-3);
+                    border-color: var(--clr-border);
+                    background-color: var(--clr-surface-2);
+                    box-shadow: none;
+                    transform: none;
+                }
+
+                @media (max-width: 900px) {
+                    .pd-grid { grid-template-columns: 1fr; }
+                    .pd-images { position: static; }
+                    .pd-lower-grid { grid-template-columns: 1fr; }
+                }
       `}</style>
         </div>
     );

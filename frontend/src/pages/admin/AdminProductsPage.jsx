@@ -26,6 +26,7 @@ const PRESET_COLORS = [
 const colorName = (hex) => PRESET_COLORS.find(c => c.hex?.toLowerCase() === hex?.toLowerCase())?.name || hex || '—';
 const normalizePieceType = (value) => String(value || '').trim();
 const normalizeProductStatus = (value) => (String(value).toLowerCase() === 'active' ? 'active' : 'inactive');
+const normalizeImages = (images) => Array.isArray(images) ? images.filter(Boolean) : [];
 
 // Empty variant = Color with its size options (NESTED STRUCTURE)
 const emptyVariant = () => ({
@@ -35,6 +36,41 @@ const emptyVariant = () => ({
 
 // Empty size option for the nested table
 const emptySizeOption = () => ({ size: 'M', stock: '', price: '', sizeErrors: {} });
+
+const groupFlatVariantsByColor = (rows, fallbackPrice = '') => {
+    const grouped = new Map();
+
+    (rows || []).forEach((row) => {
+        const colorKey = row.color || '';
+
+        if (!grouped.has(colorKey)) {
+            grouped.set(colorKey, {
+                color: colorKey,
+                images: normalizeImages(row.images),
+                imageInput: '',
+                showCustomColor: false,
+                errors: {},
+                sizeOptions: [],
+            });
+        }
+
+        const group = grouped.get(colorKey);
+
+        if (group.images.length === 0) {
+            group.images = normalizeImages(row.images);
+        }
+
+        group.sizeOptions.push({
+            variantId: row.variant_id,
+            size: row.size || 'M',
+            stock: String(row.stock ?? 0),
+            price: String(fallbackPrice ?? ''),
+            sizeErrors: {},
+        });
+    });
+
+    return Array.from(grouped.values());
+};
 
 /* ─── Validation ─────────────────────────────────────────────────────────── */
 const validateProductForm = (f) => {
@@ -84,6 +120,7 @@ export default function AdminProductsPage() {
     const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
     const [variants, setVariants] = useState([emptyVariant()]);
+    const [loadedVariantIds, setLoadedVariantIds] = useState([]);
 
     const fetchProducts = async () => {
         setLoading(true);
@@ -137,6 +174,7 @@ export default function AdminProductsPage() {
         });
         setFormErrors({});
         setVariants([emptyVariant()]);
+        setLoadedVariantIds([]);
     };
 
     const openAdd = () => { resetModal(); setShowForm(true); };
@@ -154,18 +192,16 @@ export default function AdminProductsPage() {
         try {
             const vs = await apiCall(`/products/${p.product_id}/variants`);
             if (vs.length > 0) {
-                setVariants(vs.map(v => ({
-                    variantId: v.variant_id, color: v.color || '', images: v.images || [],
-                    imageInput: '', showCustomColor: false, errors: {},
-                    sizeOptions: (v.size_options || []).map(so => ({
-                        sizeOptionId: so.size_option_id, size: so.size,
-                        stock: String(so.stock ?? ''), price: String(so.price ?? ''), sizeErrors: {},
-                    })),
-                })));
+                setVariants(groupFlatVariantsByColor(vs, p.price));
+                setLoadedVariantIds(vs.map(v => v.variant_id).filter(Boolean));
             } else {
                 setVariants([emptyVariant()]);
+                setLoadedVariantIds([]);
             }
-        } catch { setVariants([emptyVariant()]); }
+        } catch {
+            setVariants([emptyVariant()]);
+            setLoadedVariantIds([]);
+        }
         setShowForm(true);
     };
 
@@ -258,33 +294,48 @@ export default function AdminProductsPage() {
             }
 
             let variantsSaved = 0;
+            const persistedVariantIds = [];
             for (const v of toSave) {
-                try {
-                    const variantPayload = {
-                        color: v.color,
-                        images: v.images,
-                        size_options: v.sizeOptions.map(so => ({
+                for (const so of v.sizeOptions) {
+                    try {
+                        const variantPayload = {
+                            color: v.color,
                             size: so.size,
                             stock: Number(so.stock),
-                            price: Number(so.price),
-                        })),
-                    };
+                            images: v.images,
+                        };
 
-                    if (v.variantId) {
-                        await apiCall(`/products/${productId}/variants/${v.variantId}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(variantPayload),
-                        });
-                    } else {
-                        await apiCall(`/products/${productId}/variants`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(variantPayload),
-                        });
+                        if (so.variantId) {
+                            await apiCall(`/products/${productId}/variants/${so.variantId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(variantPayload),
+                            });
+                            persistedVariantIds.push(so.variantId);
+                        } else {
+                            const created = await apiCall(`/products/${productId}/variants`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(variantPayload),
+                            });
+                            if (created?.variant_id) persistedVariantIds.push(created.variant_id);
+                        }
+                        variantsSaved++;
+                    } catch (err) {
+                        showToast(`Variant error: ${err.message}`, 'error');
                     }
-                    variantsSaved++;
-                } catch (err) { showToast(`Variant error: ${err.message}`, 'error'); }
+                }
+            }
+
+            if (editId) {
+                const removedVariantIds = loadedVariantIds.filter(id => !persistedVariantIds.includes(id));
+                for (const removedId of removedVariantIds) {
+                    try {
+                        await apiCall(`/products/${productId}/variants/${removedId}`, { method: 'DELETE' });
+                    } catch (err) {
+                        showToast(`Could not delete removed variant #${removedId}: ${err.message}`, 'error');
+                    }
+                }
             }
 
             if (!editId && form.status === 'active' && variantsSaved > 0) {
