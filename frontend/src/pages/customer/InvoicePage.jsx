@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Printer, ArrowLeft, FileText, Loader2 } from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 
 export default function InvoicePage() {
     const { id } = useParams();
+    const { isAdmin } = useAuth();
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
 
@@ -35,7 +37,9 @@ export default function InvoicePage() {
             <div className="container" style={{ maxWidth: 760 }}>
                 <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-6)' }}>
                     <Link to={`/orders/${order.orderid}`} className="btn btn-ghost btn-sm"><ArrowLeft size={15} /> Back to Order</Link>
-                    <button className="btn btn-primary btn-sm" onClick={() => window.print()} id="print-invoice-btn"><Printer size={14} /> Print Invoice</button>
+                    {isAdmin && (
+                        <button className="btn btn-primary btn-sm" onClick={() => window.print()} id="print-invoice-btn"><Printer size={14} /> Print Invoice</button>
+                    )}
                 </div>
 
                 <div className="invoice-doc" id="invoice-document">

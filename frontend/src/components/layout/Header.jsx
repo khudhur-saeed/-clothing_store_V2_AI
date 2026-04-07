@@ -39,19 +39,50 @@ export default function Header() {
 
     useEffect(() => {
         if (searchQuery.length < 2) { setSearchResults([]); return; }
+        let cancelled = false;
         const timer = setTimeout(async () => {
             try {
                 const data = await apiCall('/products/', {}, { search: searchQuery });
-                setSearchResults(data.slice(0, 5).map(p => ({
-                    id: p.product_id,
-                    name: p.name,
-                    category: p.category || '',
-                    price: Number(p.price) || 0,
-                    image: null,   // no thumbnail in list; handled gracefully
-                })));
-            } catch { setSearchResults([]); }
+                const topResults = data.slice(0, 5);
+                const withImages = await Promise.all(topResults.map(async (p) => {
+                    let image = '';
+                    try {
+                        const variants = await apiCall(`/products/${p.product_id}/variants`);
+                        for (const variant of variants || []) {
+                            const imgs = variant?.images;
+                            if (Array.isArray(imgs) && imgs.length > 0 && imgs[0]) {
+                                image = imgs[0];
+                                break;
+                            }
+                            if (typeof imgs === 'string' && imgs.trim()) {
+                                image = imgs.split(',').map((s) => s.trim()).find(Boolean) || '';
+                                if (image) break;
+                            }
+                        }
+                    } catch {
+                        image = '';
+                    }
+
+                    return {
+                        id: p.product_id,
+                        name: p.name,
+                        category: p.category || '',
+                        price: Number(p.price) || 0,
+                        image,
+                    };
+                }));
+
+                if (!cancelled) {
+                    setSearchResults(withImages);
+                }
+            } catch {
+                if (!cancelled) setSearchResults([]);
+            }
         }, 300);
-        return () => clearTimeout(timer);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
     }, [searchQuery]);
 
     useEffect(() => {

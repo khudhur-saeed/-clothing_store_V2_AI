@@ -99,9 +99,9 @@ export function AppProvider({ children }) {
     // --- Addresses ---
     const addAddress = async (addr) => {
         const token = localStorage.getItem('moda_token');
-        if (!token) return;
+        if (!token) return null;
         try {
-            const newAddr = await apiCall('/addresses/', { method: 'POST' }, {
+            const createdAddress = await apiCall('/addresses/', { method: 'POST' }, {
                 title: addr.title,
                 street: addr.street,
                 city: addr.city,
@@ -110,10 +110,39 @@ export function AppProvider({ children }) {
                 is_default: addr.is_default || false,
             });
             setAddresses(prev => addr.is_default
-                ? [...prev.map(a => ({ ...a, is_default: false })), newAddr]
-                : [...prev, newAddr]);
+                ? [...prev.map(a => ({ ...a, is_default: false })), createdAddress]
+                : [...prev, createdAddress]);
+
+            return createdAddress;
         } catch (err) {
             showToast(err.message, 'error');
+            return null;
+        }
+    };
+
+    const updateAddress = async (addressId, addr) => {
+        try {
+            const updatedAddress = await apiCall(`/addresses/${addressId}`, { method: 'PUT' }, {
+                title: addr.title,
+                street: addr.street,
+                city: addr.city,
+                country: addr.country,
+                zip_code: addr.zip_code,
+                is_default: addr.is_default,
+            });
+
+            setAddresses(prev => {
+                const next = prev.map(a => a.address_id === addressId ? updatedAddress : a);
+                if (updatedAddress.is_default) {
+                    return next.map(a => ({ ...a, is_default: a.address_id === updatedAddress.address_id }));
+                }
+                return next;
+            });
+
+            return updatedAddress;
+        } catch (err) {
+            showToast(err.message, 'error');
+            return null;
         }
     };
 
@@ -270,7 +299,7 @@ export function AppProvider({ children }) {
     return (
         <AppContext.Provider value={{
             favorites, toggleFavorite, isFavorite,
-            addresses, addAddress, deleteAddress, setDefaultAddress,
+            addresses, addAddress, updateAddress, deleteAddress, setDefaultAddress,
             outfits, createOutfit, addToOutfit, removeFromOutfit, deleteOutfit, refreshOutfits,
             orders, placeOrder, fetchUserData, clearUserData,
             conversations, sendMessage, addBotMessage, createConversation,

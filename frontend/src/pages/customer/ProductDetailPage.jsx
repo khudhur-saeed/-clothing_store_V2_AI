@@ -173,7 +173,6 @@ export default function ProductDetailPage() {
 
     const activeSizeOption =
         sizesForColor.find((option) => option.size === selectedSize) ||
-        sizesForColor[0] ||
         null;
 
     const activeVariant = activeSizeOption
@@ -190,11 +189,16 @@ export default function ProductDetailPage() {
 
     const avgRating = reviews.length ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1) : (product.rating || 0);
 
-    const handleAddToCart = () => {
-        if (!selectedSize && sizesForColor.length > 1) { showToast('Please select a size', 'error'); return; }
+    const handleAddToCart = async () => {
+        if (!selectedSize) { showToast('Please select a size', 'error'); return; }
         if (!activeVariant || activeVariant.stock <= 0) { showToast('This variant is out of stock', 'error'); return; }
-        addToCart(product, activeVariant, qty);
-        showToast(`${product.name} added to cart!`);
+        try {
+            await addToCart(product, activeVariant, qty);
+            showToast(`${product.name} added to cart!`);
+            setQty(1);
+        } catch (err) {
+            showToast(err.message || 'Not enough stock available', 'error');
+        }
     };
 
     const handleSubmitReview = async (e) => {
@@ -279,6 +283,11 @@ export default function ProductDetailPage() {
                         {/* Size */}
                         <div className="form-group" style={{ marginBottom: 24 }}>
                             <label className="form-label">Size</label>
+                            {!selectedSize && sizesForColor.length > 0 && (
+                                <p className="text-xs" style={{ marginBottom: 8, color: 'var(--clr-error)' }}>
+                                    Please choose a size before adding to cart.
+                                </p>
+                            )}
                             <div className="pd-size-grid flex gap-3 flex-wrap">
                                 {sizesForColor.length === 0 && (
                                     <span className="text-sm text-muted">No sizes available for this color.</span>
@@ -321,7 +330,11 @@ export default function ProductDetailPage() {
 
                         {/* Stock */}
                         <div className="flex items-center gap-2 text-sm text-muted">
-                            {activeVariant?.stock > 0 ? <><Check size={15} color="var(--clr-success)" /> In Stock — Ships in 2-4 days</> : 'Currently out of stock'}
+                            {!selectedSize
+                                ? 'Please select a size to check stock'
+                                : activeVariant?.stock > 0
+                                    ? <><Check size={15} color="var(--clr-success)" /> In Stock — Ships in 2-4 days</>
+                                    : 'Currently out of stock'}
                         </div>
                     </div>
                 </div>

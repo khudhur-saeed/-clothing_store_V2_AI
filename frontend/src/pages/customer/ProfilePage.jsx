@@ -6,13 +6,15 @@ import { Link } from 'react-router-dom';
 
 export default function ProfilePage() {
     const { user, updateProfile } = useAuth();
-    const { addresses, addAddress, deleteAddress, setDefaultAddress, showToast } = useApp();
+    const { addresses, addAddress, updateAddress, deleteAddress, setDefaultAddress, showToast } = useApp();
 
     const [tab, setTab] = useState('info');
     const [editInfo, setEditInfo] = useState(false);
     const [form, setForm] = useState({ first_name: user?.first_name || '', last_name: user?.last_name || '', phone_No: user?.phone_No || '' });
     const [addingAddr, setAddingAddr] = useState(false);
+    const [editingAddrId, setEditingAddrId] = useState(null);
     const [newAddr, setNewAddr] = useState({ street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
+    const [editAddr, setEditAddr] = useState({ title: '', street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
     const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' });
 
     if (!user) return (
@@ -23,10 +25,39 @@ export default function ProfilePage() {
     );
 
     const saveInfo = () => { updateProfile(form); setEditInfo(false); showToast('Profile updated!'); };
-    const saveAddr = () => {
+    const saveAddr = async () => {
         if (!newAddr.street || !newAddr.city) { showToast('Please fill in street and city.', 'error'); return; }
-        addAddress(newAddr); setAddingAddr(false); setNewAddr({ street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
+        const created = await addAddress(newAddr);
+        if (!created) return;
+        setAddingAddr(false);
+        setNewAddr({ street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
         showToast('Address saved!');
+    };
+
+    const startEditAddress = (addr) => {
+        setAddingAddr(false);
+        setEditingAddrId(addr.address_id);
+        setEditAddr({
+            title: addr.title || '',
+            street: addr.street || '',
+            city: addr.city || '',
+            country: addr.country || 'Turkey',
+            zip_code: addr.zip_code || '',
+            is_default: Boolean(addr.is_default),
+        });
+    };
+
+    const cancelEditAddress = () => {
+        setEditingAddrId(null);
+        setEditAddr({ title: '', street: '', city: '', country: 'Turkey', zip_code: '', is_default: false });
+    };
+
+    const saveEditedAddress = async () => {
+        if (!editAddr.street || !editAddr.city) { showToast('Please fill in street and city.', 'error'); return; }
+        const updated = await updateAddress(editingAddrId, editAddr);
+        if (!updated) return;
+        cancelEditAddress();
+        showToast('Address updated!');
     };
     const savePw = (e) => {
         e.preventDefault();
@@ -49,9 +80,7 @@ export default function ProfilePage() {
 
                 <div className="tabs" style={{ marginBottom: 'var(--sp-8)' }}>
                     <button className={`tab-btn${tab === 'info' ? ' active' : ''}`} onClick={() => setTab('info')}><User size={14} /> Personal Info</button>
-                    {user.role !== 'admin' && (
-                        <button className={`tab-btn${tab === 'addr' ? ' active' : ''}`} onClick={() => setTab('addr')}><MapPin size={14} /> Addresses</button>
-                    )}
+                    <button className={`tab-btn${tab === 'addr' ? ' active' : ''}`} onClick={() => setTab('addr')}><MapPin size={14} /> Addresses</button>
                     <button className={`tab-btn${tab === 'pw' ? ' active' : ''}`} onClick={() => setTab('pw')}><Lock size={14} /> Password</button>
                 </div>
 
@@ -95,7 +124,7 @@ export default function ProfilePage() {
                     <div className="animate-slideUp">
                         <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-6)' }}>
                             <h2 className="font-bold text-lg">My Addresses</h2>
-                            {!addingAddr && <button className="btn btn-primary btn-sm" onClick={() => setAddingAddr(true)} id="add-address-btn"><Plus size={14} /> Add Address</button>}
+                            {!addingAddr && !editingAddrId && <button className="btn btn-primary btn-sm" onClick={() => setAddingAddr(true)} id="add-address-btn"><Plus size={14} /> Add Address</button>}
                         </div>
 
                         {addingAddr && (
@@ -121,6 +150,29 @@ export default function ProfilePage() {
                             </div>
                         )}
 
+                        {editingAddrId && (
+                            <div className="card card-body flex-col" style={{ gap: 14, marginBottom: 'var(--sp-5)' }}>
+                                <div className="font-semibold">Edit Address</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+                                    <input className="form-input" placeholder="Title (e.g. Home, Work)" value={editAddr.title || ''} onChange={e => setEditAddr(p => ({ ...p, title: e.target.value }))} />
+                                    <input className="form-input" placeholder="Street address" value={editAddr.street} onChange={e => setEditAddr(p => ({ ...p, street: e.target.value }))} />
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                    <input className="form-input" placeholder="City" value={editAddr.city} onChange={e => setEditAddr(p => ({ ...p, city: e.target.value }))} />
+                                    <input className="form-input" placeholder="Zip Code" value={editAddr.zip_code} onChange={e => setEditAddr(p => ({ ...p, zip_code: e.target.value }))} />
+                                </div>
+                                <input className="form-input" placeholder="Country" value={editAddr.country} onChange={e => setEditAddr(p => ({ ...p, country: e.target.value }))} />
+                                <label className="checkbox-label">
+                                    <input type="checkbox" checked={editAddr.is_default} onChange={e => setEditAddr(p => ({ ...p, is_default: e.target.checked }))} />
+                                    Set as default address
+                                </label>
+                                <div className="flex gap-3">
+                                    <button className="btn btn-primary btn-sm" onClick={saveEditedAddress}>Save Changes</button>
+                                    <button className="btn btn-ghost btn-sm" onClick={cancelEditAddress}>Cancel</button>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex-col" style={{ gap: 'var(--sp-4)' }}>
                             {addresses.length === 0 && <p className="text-muted">No addresses yet.</p>}
                             {addresses.map(addr => (
@@ -137,6 +189,9 @@ export default function ProfilePage() {
                                                     Set Default
                                                 </button>
                                             )}
+                                            <button className="btn btn-outline btn-sm" onClick={() => startEditAddress(addr)}>
+                                                <Edit size={14} /> Edit
+                                            </button>
                                             <button className="btn btn-ghost btn-icon btn-sm" onClick={() => { deleteAddress(addr.address_id); showToast('Address deleted.', 'info'); }}>
                                                 <Trash2 size={14} color="var(--clr-error)" />
                                             </button>

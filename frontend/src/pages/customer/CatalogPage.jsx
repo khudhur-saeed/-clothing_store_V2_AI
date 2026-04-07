@@ -1,10 +1,29 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { SlidersHorizontal, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { useProducts } from '../../api/products';
 import ProductCard from '../../components/ui/ProductCard';
 
-const pieceTypes = ['top', 'bottom', 'outerwear', 'footwear', 'accessory'];
+const pieceTypes = [
+    { query: 'top', value: 'Tops', label: 'Top' },
+    { query: 'bottom', value: 'Bottoms', label: 'Bottom' },
+    { query: 'outerwear', value: 'Outerwear', label: 'Outerwear' },
+    { query: 'shoes', value: 'Shoes', label: 'Shoes' },
+    { query: 'accessory', value: 'Accessories', label: 'Accessory' },
+];
+
+const pieceQueryMap = {
+    top: 'Tops',
+    tops: 'Tops',
+    bottom: 'Bottoms',
+    bottoms: 'Bottoms',
+    outerwear: 'Outerwear',
+    footwear: 'Shoes',
+    shoes: 'Shoes',
+    accessory: 'Accessories',
+    accessories: 'Accessories',
+};
+
 const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
 
 function FilterSection({ title, open, toggle, children }) {
@@ -23,18 +42,62 @@ export default function CatalogPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
     const [openSections, setOpenSections] = useState({ cat: true, piece: true, size: true, price: true });
-    const [priceMax, setPriceMax] = useState(500);
 
-    const activeCat = searchParams.get('category') ? Number(searchParams.get('category')) : null;
-    const activePiece = searchParams.get('piece') || null;
+    const activeCategory = searchParams.get('category') || null;
+    const activePieceQuery = (searchParams.get('piece') || '').toLowerCase();
+    const activePiece = pieceQueryMap[activePieceQuery] || null;
     const activeSize = searchParams.get('size') || null;
+    const minPriceInput = searchParams.get('min_price') || '';
+    const maxPriceInput = searchParams.get('max_price') || '';
     const sortBy = searchParams.get('sort') || 'newest';
     const query = searchParams.get('q') || '';
+    const [minPriceDraft, setMinPriceDraft] = useState(minPriceInput);
+    const [maxPriceDraft, setMaxPriceDraft] = useState(maxPriceInput);
+
+    useEffect(() => {
+        setMinPriceDraft(minPriceInput);
+    }, [minPriceInput]);
+
+    useEffect(() => {
+        setMaxPriceDraft(maxPriceInput);
+    }, [maxPriceInput]);
+
+    const categoryIsNumericId = Boolean(activeCategory && /^\d+$/.test(activeCategory));
+
+    const minPrice = minPriceInput !== '' ? Number(minPriceInput) : null;
+    const maxPrice = maxPriceInput !== '' ? Number(maxPriceInput) : null;
+    const hasValidMin = minPrice != null && Number.isFinite(minPrice) && minPrice >= 0;
+    const hasValidMax = maxPrice != null && Number.isFinite(maxPrice) && maxPrice >= 0;
+    const priceRangeInvalid = hasValidMin && hasValidMax && minPrice > maxPrice;
 
     const setParam = (key, val) => {
         const p = new URLSearchParams(searchParams);
-        if (val) p.set(key, val); else p.delete(key);
+        if (val !== null && val !== undefined && val !== '') p.set(key, String(val)); else p.delete(key);
         setSearchParams(p);
+    };
+
+    const onPriceDraftChange = (setter, rawValue) => {
+        const digitsOnly = String(rawValue ?? '').replace(/\D+/g, '');
+        setter(digitsOnly);
+    };
+
+    const commitPriceParam = (key, value) => {
+        const trimmed = String(value ?? '').trim();
+        if (trimmed === '') {
+            setParam(key, null);
+            return;
+        }
+        const numeric = Number(trimmed);
+        if (Number.isFinite(numeric) && numeric >= 0) {
+            setParam(key, numeric);
+        }
+    };
+
+    const onPriceKeyDown = (event, key, value) => {
+        if (event.key === 'Enter') {
+            commitPriceParam(key, value);
+            event.currentTarget.blur();
+        }
     };
 
     const clearAll = () => setSearchParams({});
@@ -44,19 +107,39 @@ export default function CatalogPage() {
     // Fetch from real API — pass search and category as params
     const { products, loading } = useProducts({
         ...(query ? { search: query } : {}),
-        ...(activeCat ? { category: activeCat } : {}),
-        ...(priceMax < 500 ? { max_price: priceMax } : {}),
+        ...(activeCategory
+            ? (categoryIsNumericId
+                ? { category_id: Number(activeCategory) }
+                : { category: activeCategory })
+            : {}),
+        ...(activePiece ? { piece_type: activePiece } : {}),
+        ...(!priceRangeInvalid && hasValidMin ? { min_price: minPrice } : {}),
+        ...(!priceRangeInvalid && hasValidMax ? { max_price: maxPrice } : {}),
     });
 
     // Build categories list from actual product data
     const parents = useMemo(() => {
-        const cats = [...new Set(products.map(p => p.category).filter(Boolean))];
-        return cats.map((c) => ({ id: c, name: c }));
+        const byId = new Map();
+        products.forEach((p) => {
+            if (!p?.category) return;
+            const id = p.category_id != null ? String(p.category_id) : String(p.category);
+            if (!byId.has(id)) byId.set(id, { id, name: p.category });
+        });
+        return Array.from(byId.values());
     }, [products]);
+
+    const activeCategoryLabel = useMemo(() => {
+        if (!activeCategory) return null;
+        const found = parents.find(c =>
+            String(c.id) === String(activeCategory)
+            || String(c.name).toLowerCase() === String(activeCategory).toLowerCase()
+        );
+        return found?.name || activeCategory;
+    }, [activeCategory, parents]);
 
     const filtered = useMemo(() => {
         let list = [...products];
-        if (activePiece) list = list.filter(p => p.piece_type === activePiece);
+        if (activePiece) list = list.filter(p => String(p.piece_type || '').toLowerCase() === activePiece.toLowerCase());
         if (activeSize) list = list.filter(p => p.variants.some(v => v.size === activeSize));
         if (sortBy === 'price-asc') list.sort((a, b) => a.price - b.price);
         if (sortBy === 'price-desc') list.sort((a, b) => b.price - a.price);
@@ -65,7 +148,7 @@ export default function CatalogPage() {
     }, [products, activePiece, activeSize, sortBy]);
 
 
-    const Filters = () => (
+    const renderFilters = () => (
         <div className="filters-panel">
             <div className="filters-header">
                 <span className="font-bold text-base">Filters</span>
@@ -74,9 +157,17 @@ export default function CatalogPage() {
 
             <FilterSection title="Category" open={openSections.cat} toggle={() => toggle('cat')}>
                 <div className="flex-col" style={{ gap: 6 }}>
-                    <button className={`filter-opt${!activeCat ? ' active' : ''}`} onClick={() => setParam('category', null)}>All Categories</button>
+                    <button className={`filter-opt${!activeCategory ? ' active' : ''}`} onClick={() => setParam('category', null)}>All Categories</button>
                     {parents.map(c => (
-                        <button key={c.id} className={`filter-opt${activeCat === c.id ? ' active' : ''}`} onClick={() => setParam('category', activeCat === c.id ? null : c.id)}>
+                        <button
+                            key={c.id}
+                            className={`filter-opt${String(activeCategory || '').toLowerCase() === String(c.id).toLowerCase() || String(activeCategory || '').toLowerCase() === String(c.name).toLowerCase() ? ' active' : ''}`}
+                            onClick={() => {
+                                const isActive = String(activeCategory || '').toLowerCase() === String(c.id).toLowerCase()
+                                    || String(activeCategory || '').toLowerCase() === String(c.name).toLowerCase();
+                                setParam('category', isActive ? null : String(c.id));
+                            }}
+                        >
                             {c.name}
                         </button>
                     ))}
@@ -86,8 +177,8 @@ export default function CatalogPage() {
             <FilterSection title="Piece Type" open={openSections.piece} toggle={() => toggle('piece')}>
                 <div className="flex flex-wrap" style={{ gap: 6 }}>
                     {pieceTypes.map(pt => (
-                        <button key={pt} className={`size-btn${activePiece === pt ? ' active' : ''}`} onClick={() => setParam('piece', activePiece === pt ? null : pt)}>
-                            {pt.charAt(0).toUpperCase() + pt.slice(1)}
+                        <button key={pt.query} className={`size-btn${activePiece === pt.value ? ' active' : ''}`} onClick={() => setParam('piece', activePiece === pt.value ? null : pt.query)}>
+                            {pt.label}
                         </button>
                     ))}
                 </div>
@@ -101,14 +192,43 @@ export default function CatalogPage() {
                 </div>
             </FilterSection>
 
-            <FilterSection title="Max Price" open={openSections.price} toggle={() => toggle('price')}>
+            <FilterSection title="Price Range" open={openSections.price} toggle={() => toggle('price')}>
                 <div style={{ paddingTop: 8 }}>
-                    <div className="flex justify-between text-sm" style={{ marginBottom: 10 }}>
-                        <span className="text-muted">$0</span>
-                        <span className="text-primary font-bold">${priceMax}</span>
+                    <div className="flex gap-2" style={{ marginBottom: 10 }}>
+                        <div className="flex-1">
+                            <label className="text-xs text-muted" style={{ display: 'block', marginBottom: 6 }}>Min</label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                className="form-input"
+                                placeholder="0"
+                                value={minPriceDraft}
+                                onChange={(e) => onPriceDraftChange(setMinPriceDraft, e.target.value)}
+                                onBlur={(e) => commitPriceParam('min_price', e.target.value)}
+                                onKeyDown={(e) => onPriceKeyDown(e, 'min_price', minPriceDraft)}
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-xs text-muted" style={{ display: 'block', marginBottom: 6 }}>Max</label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                className="form-input"
+                                placeholder="500"
+                                value={maxPriceDraft}
+                                onChange={(e) => onPriceDraftChange(setMaxPriceDraft, e.target.value)}
+                                onBlur={(e) => commitPriceParam('max_price', e.target.value)}
+                                onKeyDown={(e) => onPriceKeyDown(e, 'max_price', maxPriceDraft)}
+                            />
+                        </div>
                     </div>
-                    <input type="range" min={20} max={500} step={10} value={priceMax} onChange={e => setPriceMax(Number(e.target.value))}
-                        style={{ '--val': `${((priceMax - 20) / 480) * 100}%` }} />
+                    {priceRangeInvalid && (
+                        <p className="text-xs" style={{ color: 'var(--clr-error)' }}>
+                            Min price must be less than or equal to max price.
+                        </p>
+                    )}
                 </div>
             </FilterSection>
         </div>
@@ -142,11 +262,13 @@ export default function CatalogPage() {
                 </div>
 
                 {/* Active filters */}
-                {(activeCat || activePiece || activeSize || query) && (
+                {(activeCategory || activePiece || activeSize || query || minPriceInput || maxPriceInput) && (
                     <div className="flex flex-wrap gap-2" style={{ marginBottom: 'var(--sp-6)' }}>
-                        {activeCat && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('category', null)}>{parents.find(c => c.id === activeCat)?.name} <X size={11} /></span>}
+                        {activeCategory && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('category', null)}>{activeCategoryLabel} <X size={11} /></span>}
                         {activePiece && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('piece', null)}>{activePiece} <X size={11} /></span>}
                         {activeSize && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('size', null)}>Size: {activeSize} <X size={11} /></span>}
+                        {minPriceInput && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('min_price', null)}>Min: ${minPriceInput} <X size={11} /></span>}
+                        {maxPriceInput && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('max_price', null)}>Max: ${maxPriceInput} <X size={11} /></span>}
                         {query && <span className="badge badge-primary" style={{ cursor: 'pointer', gap: 4 }} onClick={() => setParam('q', null)}>"{query}" <X size={11} /></span>}
                     </div>
                 )}
@@ -154,21 +276,21 @@ export default function CatalogPage() {
                 <div className="layout-sidebar">
                     {/* Filters — desktop */}
                     <div className="desktop-only" style={{ display: 'block' }}>
-                        <Filters />
+                                {renderFilters()}
                     </div>
 
                     {/* Product grid */}
                     <div>
-                        {filtered.length === 0 ? (
+                        {loading ? (
+                            <div className="text-center" style={{ padding: 'var(--sp-20) 0' }}>
+                                <p className="text-muted">Loading products...</p>
+                            </div>
+                        ) : filtered.length === 0 ? (
                             <div className="text-center" style={{ padding: 'var(--sp-20) 0' }}>
                                 <p className="text-2xl" style={{ marginBottom: 8 }}>😮‍💨</p>
                                 <p className="font-semibold">No products found</p>
                                 <p className="text-muted text-sm" style={{ marginTop: 6 }}>Try adjusting your filters or search term</p>
                                 <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={clearAll}>Clear Filters</button>
-                            </div>
-                        ) : loading ? (
-                            <div className="text-center" style={{ padding: 'var(--sp-20) 0' }}>
-                                <p className="text-muted">Loading products...</p>
                             </div>
                         ) : (
                             <div className="grid-3 grid" style={{ gap: 'var(--sp-5)' }}>
@@ -188,7 +310,7 @@ export default function CatalogPage() {
                             <button onClick={() => setMobileFiltersOpen(false)}><X size={20} /></button>
                         </div>
                         <div style={{ padding: 'var(--sp-4)' }}>
-                            <Filters />
+                            {renderFilters()}
                         </div>
                         <div className="modal-footer">
                             <button className="btn btn-primary w-full" onClick={() => setMobileFiltersOpen(false)}>

@@ -339,9 +339,20 @@ export default function OutfitBuilderPage() {
             console.log('📤 Saving outfit with payload:', payload);
 
             let result;
-            if (currentOutfit.isSaved) {
-                console.log(`🔄 Updating outfit ${currentOutfit.outfit_id}`);
-                result = await apiCall(`/outfits/${currentOutfit.outfit_id}`, { method: 'PUT' }, payload);
+            const outfitId = currentOutfit.outfit_id;
+            if (currentOutfit.isSaved && outfitId) {
+                console.log(`🔄 Updating outfit ${outfitId}`);
+                try {
+                    result = await apiCall(`/outfits/${outfitId}`, { method: 'PUT' }, payload);
+                } catch (err) {
+                    // If record no longer exists, recover by creating a new outfit instead of hard-failing.
+                    if (String(err.message || '').toLowerCase().includes('not found')) {
+                        console.warn(`⚠️ Outfit ${outfitId} not found during update. Creating a new outfit instead.`);
+                        result = await apiCall('/outfits/', { method: 'POST' }, payload);
+                    } else {
+                        throw err;
+                    }
+                }
             } else {
                 console.log('✨ Creating new outfit');
                 result = await apiCall('/outfits/', { method: 'POST' }, payload);

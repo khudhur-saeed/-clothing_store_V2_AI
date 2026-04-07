@@ -1,6 +1,30 @@
 import { useState, useEffect } from 'react';
 import { apiCall } from './client';
 
+function maskUserName(name) {
+    const safe = String(name || '').trim();
+    if (!safe) return 'Us**';
+
+    let visibleCount = 0;
+    let masked = '';
+
+    for (const ch of safe) {
+        if (ch === ' ') {
+            masked += ' ';
+            continue;
+        }
+
+        if (visibleCount < 2) {
+            masked += ch;
+            visibleCount += 1;
+        } else {
+            masked += '*';
+        }
+    }
+
+    return masked;
+}
+
 /**
  * Transforms a real API product + variants into the shape the UI components expect.
  * Our DB has: product (id, name, description, price, status, category)
@@ -142,7 +166,7 @@ export function useReviews(productId) {
                 id: r.reviewid,
                 product_id: r.product_id,
                 user_id: r.user_id,
-                user_name: `User ${r.user_id}`,
+                user_name: maskUserName(r.user_name || r.username || `User ${r.user_id}`),
                 rating: r.rating,
                 comment: r.comment,
                 review_date: r.review_date?.split('T')[0] || '',

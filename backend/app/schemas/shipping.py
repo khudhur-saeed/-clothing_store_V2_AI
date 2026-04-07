@@ -6,6 +6,8 @@ class ShippingBase(BaseModel):
     orderid: int
     shipping_status: Optional[str] = None
     label: Optional[str] = None
+    tracking_number: Optional[str] = None
+    estimated_delivery: Optional[datetime] = None
 
 class ShippingCreate(ShippingBase):
     pass
@@ -13,6 +15,8 @@ class ShippingCreate(ShippingBase):
 class ShippingUpdate(BaseModel):
     shipping_status: Optional[str] = None
     label: Optional[str] = None
+    tracking_number: Optional[str] = None
+    estimated_delivery: Optional[datetime] = None
 
 class ShippingOut(ShippingBase):
     shippingid: int

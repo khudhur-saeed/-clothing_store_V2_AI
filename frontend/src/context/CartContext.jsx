@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { apiCall } from '../api/client';
+import { useAuth } from './AuthContext';
 
 const CartContext = createContext(null);
 
@@ -30,13 +31,16 @@ function normalizeCartItem(raw) {
 }
 
 export function CartProvider({ children }) {
+    const { user } = useAuth();
     const [cartItems, setCartItems] = useState([]);
-    const [loading, setLoading] = useState(false);
 
     /* ── Fetch cart from API ───────────────────────────────────────── */
     const fetchCart = async () => {
         const token = localStorage.getItem('moda_token');
-        if (!token) return;
+        if (!token || !user?.user_id) {
+            setCartItems([]);
+            return;
+        }
         try {
             const items = await apiCall('/cart/');
             setCartItems(Array.isArray(items) ? items.map(normalizeCartItem) : []);
@@ -45,18 +49,37 @@ export function CartProvider({ children }) {
         }
     };
 
-    useEffect(() => { fetchCart(); }, []);
+    useEffect(() => {
+        if (!user?.user_id) {
+            setCartItems([]);
+            return;
+        }
+        fetchCart();
+    }, [user?.user_id]);
 
     /* ── Add item ──────────────────────────────────────────────────── */
     const addToCart = async (product, variant, quantity = 1) => {
+        const qtyToAdd = Number(quantity) || 1;
+        if (qtyToAdd < 1) {
+            throw new Error('Quantity must be at least 1');
+        }
+
         const token = localStorage.getItem('moda_token');
         if (!token) {
             // Guest: store locally
+            const existing = cartItems.find(i => i.variantId === variant.variant_id);
+            const stock = Number(variant.stock ?? existing?.stock ?? 0);
+            const currentQty = Number(existing?.quantity || 0);
+            if (stock > 0 && currentQty + qtyToAdd > stock) {
+                throw new Error(`Only ${stock} item(s) available in stock`);
+            }
+
             setCartItems(prev => {
                 const existing = prev.find(i => i.variantId === variant.variant_id);
+
                 if (existing) {
                     return prev.map(i => i.variantId === variant.variant_id
-                        ? { ...i, quantity: i.quantity + quantity } : i);
+                        ? { ...i, quantity: i.quantity + qtyToAdd } : i);
                 }
                 const imgs = variant.images || [];
                 return [...prev, {
@@ -68,19 +91,16 @@ export function CartProvider({ children }) {
                     color: variant.color || '',
                     size: variant.size || '',
                     price: Number(product.price) || 0,
-                    stock: variant.stock ?? 0,
-                    quantity,
+                    stock: Number(variant.stock ?? 0),
+                    quantity: qtyToAdd,
                     image: Array.isArray(imgs) ? (imgs[0]?.url || imgs[0] || '') : '',
                 }];
             });
             return;
         }
-        try {
-            await apiCall('/cart/', { method: 'POST' }, { variant_id: variant.variant_id, quantity });
-            await fetchCart(); // Always refresh from server to keep truth
-        } catch (err) {
-            console.error('Add to cart failed:', err.message);
-        }
+
+        await apiCall('/cart/', { method: 'POST' }, { variant_id: variant.variant_id, quantity: qtyToAdd });
+        await fetchCart(); // Always refresh from server to keep truth
     };
 
     /* ── Remove ────────────────────────────────────────────────────── */
@@ -103,15 +123,16 @@ export function CartProvider({ children }) {
         if (quantity < 1) { removeFromCart(variantId); return; }
         const token = localStorage.getItem('moda_token');
         if (!token) {
+            const target = cartItems.find(i => i.variantId === variantId);
+            const stock = Number(target?.stock ?? 0);
+            if (stock > 0 && quantity > stock) {
+                throw new Error(`Only ${stock} item(s) available in stock`);
+            }
             setCartItems(prev => prev.map(i => i.variantId === variantId ? { ...i, quantity } : i));
             return;
         }
-        try {
-            await apiCall(`/cart/${variantId}`, { method: 'PUT' }, { quantity });
-            setCartItems(prev => prev.map(i => i.variantId === variantId ? { ...i, quantity } : i));
-        } catch (err) {
-            console.error('Update qty failed:', err.message);
-        }
+        await apiCall(`/cart/${variantId}`, { method: 'PUT' }, { quantity });
+        await fetchCart();
     };
 
     const clearCart = () => setCartItems([]);

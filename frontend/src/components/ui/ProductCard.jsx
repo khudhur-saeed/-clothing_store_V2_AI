@@ -28,11 +28,17 @@ export default function ProductCard({ product }) {
     const primaryImage = product.images.find(i => i.is_primary)?.url || product.images[0]?.url;
     const displayPrice = Number(primaryVariant?.price ?? product.price ?? 0).toFixed(2);
 
-    const handleAddToCart = (e) => {
+    const handleAddToCart = async (e) => {
         e.preventDefault(); e.stopPropagation();
-        if (primaryVariant && primaryVariant.stock > 0) {
-            addToCart(product, primaryVariant, 1);
+        if (!primaryVariant || primaryVariant.stock <= 0) {
+            showToast('This variant is out of stock', 'error');
+            return;
+        }
+        try {
+            await addToCart(product, primaryVariant, 1);
             showToast(`${product.name} added to cart!`);
+        } catch (err) {
+            showToast(err.message || 'Not enough stock available', 'error');
         }
     };
 

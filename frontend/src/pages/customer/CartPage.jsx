@@ -1,15 +1,25 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Trash2, ShoppingBag, ArrowRight, Tag, X } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
+import { useApp } from '../../context/AppContext';
 import { apiCall } from '../../api/client';
 import { useState } from 'react';
 
 export default function CartPage() {
     const { cartItems, removeFromCart, updateQty, cartTotal, clearCart } = useCart();
+    const { showToast } = useApp();
     const [couponInput, setCouponInput] = useState('');
     const [coupon, setCoupon] = useState(null);
     const [couponError, setCouponError] = useState('');
     const navigate = useNavigate();
+
+    const changeQty = async (variantId, quantity) => {
+        try {
+            await updateQty(variantId, quantity);
+        } catch (err) {
+            showToast(err.message || 'Cannot update quantity', 'error');
+        }
+    };
 
     const applyCoupon = async () => {
         setCouponError('');
@@ -71,9 +81,15 @@ export default function CartPage() {
                                             <td><span className="text-primary font-semibold">${item.price.toFixed(2)}</span></td>
                                             <td>
                                                 <div className="qty-stepper">
-                                                    <button onClick={() => updateQty(item.variantId, item.quantity - 1)}>–</button>
+                                                    <button onClick={() => changeQty(item.variantId, item.quantity - 1)}>–</button>
                                                     <span>{item.quantity}</span>
-                                                    <button onClick={() => updateQty(item.variantId, item.quantity + 1)}>+</button>
+                                                    <button
+                                                        onClick={() => changeQty(item.variantId, item.quantity + 1)}
+                                                        disabled={Number(item.stock || 0) <= 0 || item.quantity >= Number(item.stock)}
+                                                        title={Number(item.stock || 0) <= 0 ? 'Out of stock' : (item.quantity >= Number(item.stock) ? 'Reached stock limit' : '')}
+                                                    >
+                                                        +
+                                                    </button>
                                                 </div>
                                             </td>
                                             <td><span className="font-bold">${(item.price * item.quantity).toFixed(2)}</span></td>

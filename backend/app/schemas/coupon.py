@@ -1,11 +1,13 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 class CouponBase(BaseModel):
     coupon_code: str
     discount: Optional[Decimal] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     expiration_date: Optional[date] = None
     min_order_amount: Decimal = 0
     usage_limit: int = 100
@@ -17,6 +19,8 @@ class CouponCreate(CouponBase):
 
 class CouponUpdate(BaseModel):
     discount: Optional[Decimal] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     expiration_date: Optional[date] = None
     min_order_amount: Optional[Decimal] = None
     usage_limit: Optional[int] = None

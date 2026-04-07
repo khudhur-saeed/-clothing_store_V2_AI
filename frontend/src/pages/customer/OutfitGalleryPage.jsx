@@ -303,16 +303,20 @@ export default function OutfitGalleryPage() {
         }
     };
 
-    const handleAddSingleProductToCart = (product) => {
+    const handleAddSingleProductToCart = async (product) => {
         if (!product?.primaryVariant) {
             showToast('This product is currently unavailable', 'error');
             return;
         }
-        addToCart(product, product.primaryVariant, 1);
-        showToast(`${product.name} added to cart`, 'success');
+        try {
+            await addToCart(product, product.primaryVariant, 1);
+            showToast(`${product.name} added to cart`, 'success');
+        } catch (err) {
+            showToast(err.message || 'Not enough stock available', 'error');
+        }
     };
 
-    const handleAddFullOutfitToCart = (outfit) => {
+    const handleAddFullOutfitToCart = async (outfit) => {
         const products = (outfit.items || [])
             .map(id => productMap[id])
             .filter(p => p && p.primaryVariant);
@@ -322,10 +326,23 @@ export default function OutfitGalleryPage() {
             return;
         }
 
-        products.forEach(product => {
-            addToCart(product, product.primaryVariant, 1);
-        });
-        showToast(`Added ${products.length} product(s) from outfit`, 'success');
+        let addedCount = 0;
+        let lastError = '';
+        for (const product of products) {
+            try {
+                await addToCart(product, product.primaryVariant, 1);
+                addedCount += 1;
+            } catch (err) {
+                lastError = err.message || 'Not enough stock available';
+            }
+        }
+
+        if (addedCount > 0) {
+            showToast(`Added ${addedCount} product(s) from outfit`, 'success');
+        }
+        if (addedCount < products.length) {
+            showToast(lastError || 'Some items could not be added due to stock limits', 'error');
+        }
     };
 
     const toggleEditorProduct = (productId) => {
