@@ -10,7 +10,10 @@ const normalizePersistedOutfit = (o) => ({
     description: o.description,
     visibility: o.visibility || (o.isPublic ? 'public' : 'private'),
     department: o.department,
+    target_category_id: o.target_category_id ?? o.targetCategoryId ?? o.category_id ?? null,
+    targetCategoryId: o.targetCategoryId ?? o.target_category_id ?? o.category_id ?? null,
     products: o.products || o.items || [],
+    slotMap: o.slotMap || {},
     created_at: o.created_at || o.createdAt,
     updated_at: o.updated_at,
     isSaved: true,
@@ -151,45 +154,59 @@ export function AppProvider({ children }) {
 
     // --- Outfits (local) ---
     const createOutfit = (outfit) => {
-        setOutfits(prev => [...prev, { 
-            ...outfit, 
-            outfit_id: Date.now(), 
+        const createdOutfit = {
+            ...outfit,
+            outfit_id: Date.now(),
             user_id: 1, 
             products: [],
-            department: outfit.department || null,  // Locked on first product addition
+            slotMap: {},
             createdAt: new Date().toISOString(),
             isSaved: false  // Mark as not yet saved to database
-        }]);
+        };
+        setOutfits(prev => [...prev, createdOutfit]);
+        return createdOutfit;
     };
 
-    const addToOutfit = (outfitId, productId, department = null) => {
+    const addToOutfit = (outfitId, productId, pieceType = null, replaceProductId = null) => {
         setOutfits(prev => prev.map(o => {
             if (o.outfit_id !== outfitId) return o;
 
-            // Validation 3: Check for duplicates
-            if (o.products.includes(productId)) {
+            let nextProducts = [...o.products];
+            const nextSlotMap = { ...(o.slotMap || {}) };
+
+            if (replaceProductId && replaceProductId !== productId) {
+                nextProducts = nextProducts.filter(id => id !== replaceProductId);
+            }
+
+            if (pieceType && nextSlotMap[pieceType] && nextSlotMap[pieceType] !== productId) {
+                nextProducts = nextProducts.filter(id => id !== nextSlotMap[pieceType]);
+            }
+
+            if (nextProducts.includes(productId)) {
                 showToast('This item is already in your outfit', 'error');
                 return o;
             }
 
-            // Validation 1: Lock department on first product
-            if (o.products.length === 0 && department) {
-                return { ...o, products: [...o.products, productId], department };
+            nextProducts.push(productId);
+
+            if (pieceType) {
+                nextSlotMap[pieceType] = productId;
             }
 
-            // If not the first product and department exists, verify match
-            if (o.department && department && o.department !== department) {
-                showToast(`This item is for ${department} but your outfit is for ${o.department}`, 'error');
-                return o;
-            }
-
-            return { ...o, products: [...o.products, productId] };
+            return { ...o, products: nextProducts, slotMap: nextSlotMap };
         }));
     };
 
     const removeFromOutfit = (outfitId, productId) => {
         setOutfits(prev => prev.map(o => o.outfit_id === outfitId
-            ? { ...o, products: o.products.filter(id => id !== productId) } : o));
+            ? {
+                ...o,
+                products: o.products.filter(id => id !== productId),
+                slotMap: Object.fromEntries(
+                    Object.entries(o.slotMap || {}).filter(([, id]) => id !== productId)
+                )
+            }
+            : o));
     };
 
     const deleteOutfit = async (outfitId) => {

@@ -10,7 +10,7 @@ class Outfit(Base):
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     visibility = Column(String(50), nullable=True, default='private')  # 'public' or 'private'
-    department = Column(String(50), nullable=True)  # Men, Women, Boys, Girls, Unisex
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)  # Category context
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

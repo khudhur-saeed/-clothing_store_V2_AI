@@ -90,7 +90,7 @@ export default function Header() {
                             <div className="outfit-nav-dropdown animate-slideUp">
                                 <Link to="/outfits?section=my" className="dropdown-item">My Outfits</Link>
                                 <Link to="/outfits?section=community" className="dropdown-item">Community Outfits</Link>
-                                <Link to="/outfits?section=create" className="dropdown-item">Create / Edit Outfit</Link>
+                                <Link to="/outfits/builder" className="dropdown-item">Create / Edit Outfit</Link>
                             </div>
                         )}
                     </div>
@@ -205,7 +205,7 @@ export default function Header() {
                     <Link to="/products" className="mobile-nav-link">All Products</Link>
                     <Link to="/outfits?section=my" className="mobile-nav-link">My Outfits</Link>
                     <Link to="/outfits?section=community" className="mobile-nav-link">Community Outfits</Link>
-                    <Link to="/outfits?section=create" className="mobile-nav-link">Create / Edit Outfit</Link>
+                    <Link to="/outfits/builder" className="mobile-nav-link">Create / Edit Outfit</Link>
                     <Link to="/chat" className="mobile-nav-link">Chatbot</Link>
                     {user && <Link to="/profile" className="mobile-nav-link">My Profile</Link>}
                     {user && <Link to="/orders" className="mobile-nav-link">My Orders</Link>}

@@ -27,7 +27,7 @@ export default function Footer() {
                             <li><Link to="/products?category=1">Women</Link></li>
                             <li><Link to="/products?category=2">Men</Link></li>
                             <li><Link to="/products?category=3">Accessories</Link></li>
-                            <li><Link to="/outfits?section=create">Outfit Builder</Link></li>
+                            <li><Link to="/outfits/builder">Outfit Builder</Link></li>
                         </ul>
                     </div>
 

@@ -1,379 +1,727 @@
-import { useState, useEffect } from 'react';
-import { Plus, X, Eye, Lock, Trash2, Package, AlertCircle, Save, Edit2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { Plus, X, Eye, Lock, Trash2, Package, Sparkles, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { apiCall } from '../../api/client';
-import { Link, useLocation } from 'react-router-dom';
 
 const PIECE_TYPES = ['Tops', 'Bottoms', 'Outerwear', 'Shoes', 'Accessories'];
-const TARGET_GROUPS = ['Women', 'Men', 'Boys', 'Girls', 'Unisex'];
+
+const normalizePieceType = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return PIECE_TYPES.find((slot) => slot.toLowerCase() === normalized) || '';
+};
+
+const getPieceType = (product) => normalizePieceType(product?.piece_type || product?.outfit_slot);
+
+const getOutfitDateLabel = (outfit) => {
+    const raw = outfit?.created_at || outfit?.createdAt;
+    const parsed = raw ? new Date(raw) : new Date();
+    return Number.isNaN(parsed.getTime()) ? new Date().toLocaleDateString() : parsed.toLocaleDateString();
+};
 
 export default function OutfitBuilderPage() {
     const { outfits, createOutfit, addToOutfit, removeFromOutfit, deleteOutfit, showToast, refreshOutfits } = useApp();
     const { user } = useAuth();
     const location = useLocation();
-    const [selectedOutfit, setSelectedOutfit] = useState(null);
-    const [showCreate, setShowCreate] = useState(false);
-    const [newOutfit, setNewOutfit] = useState({ name: '', description: '', visibility: 'public', department: 'Women' });
-    const [addingType, setAddingType] = useState(null);
+
+    const [selectedOutfitId, setSelectedOutfitId] = useState(null);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+
+    const [createForm, setCreateForm] = useState({
+        name: '',
+        description: '',
+        visibility: 'public',
+        categoryId: '',
+    });
+
+    const [categories, setCategories] = useState([]);
     const [allProducts, setAllProducts] = useState([]);
-    const [productVariants, setProductVariants] = useState({});
+    const [variantsByProductId, setVariantsByProductId] = useState({});
+
+    const [currentCategoryId, setCurrentCategoryId] = useState('');
+    const [outfitCategoryMap, setOutfitCategoryMap] = useState({});
+    const [activeSlot, setActiveSlot] = useState(null);
+
     const [filteredProducts, setFilteredProducts] = useState([]);
-    // New state for Save/Edit
-    const [showSaveModal, setShowSaveModal] = useState(false);
-    const [isEditing, setIsEditing] = useState(false);
-    const [saveForm, setSaveForm] = useState({ name: '', visibility: 'private' });
-    const [saving, setSaving] = useState(false);
+    const [loadingPicker, setLoadingPicker] = useState(false);
+    const [savingOutfit, setSavingOutfit] = useState(false);
+
+    const currentOutfit = useMemo(
+        () => outfits.find((outfit) => outfit.outfit_id === selectedOutfitId) || null,
+        [outfits, selectedOutfitId]
+    );
+
+    const productMap = useMemo(() => {
+        const map = new Map();
+        for (const product of [...allProducts, ...filteredProducts]) {
+            if (product?.product_id != null) map.set(product.product_id, product);
+        }
+        return map;
+    }, [allProducts, filteredProducts]);
+
+    const outfitProducts = useMemo(() => {
+        if (!currentOutfit) return [];
+        return (currentOutfit.products || [])
+            .map((productId) => productMap.get(productId))
+            .filter(Boolean);
+    }, [currentOutfit, productMap]);
+
+    const slotProducts = useMemo(() => {
+        const map = {};
+        for (const product of outfitProducts) {
+            const slot = getPieceType(product);
+            if (slot) map[slot] = product;
+        }
+        return map;
+    }, [outfitProducts]);
+
+    const ensureVariantsLoaded = async (productIds) => {
+        const missingIds = (productIds || []).filter((id) => id && !variantsByProductId[id]);
+        if (missingIds.length === 0) return;
+
+        const rows = await Promise.all(
+            missingIds.map(async (productId) => {
+                try {
+                    const variants = await apiCall(`/products/${productId}/variants`);
+                    return [productId, Array.isArray(variants) ? variants : []];
+                } catch {
+                    return [productId, []];
+                }
+            })
+        );
+
+        setVariantsByProductId((prev) => ({
+            ...prev,
+            ...Object.fromEntries(rows),
+        }));
+    };
 
     useEffect(() => {
-        const fetchProducts = async () => {
+        if (!user) return;
+
+        const loadData = async () => {
             try {
-                const products = await apiCall('/products/');
-                setAllProducts(products);
-                
-                // Fetch variants for each product
-                const variantsMap = {};
-                for (const p of products) {
-                    try {
-                        const variants = await apiCall(`/products/${p.product_id}/variants`);
-                        variantsMap[p.product_id] = variants;
-                    } catch {
-                        variantsMap[p.product_id] = [];
-                    }
+                const [categoryRows, products] = await Promise.all([
+                    apiCall('/categories/').catch(() => []),
+                    apiCall('/products/'),
+                ]);
+
+                const safeCategories = (categoryRows || [])
+                    .filter((row) => row && row.id != null && row.name)
+                    .map((row) => ({ id: Number(row.id), name: String(row.name).trim() }))
+                    .filter((row) => row.name.length > 0);
+
+                const safeProducts = Array.isArray(products) ? products : [];
+
+                setCategories(safeCategories);
+                setAllProducts(safeProducts);
+
+                if (safeCategories.length > 0) {
+                    setCreateForm((prev) => ({
+                        ...prev,
+                        categoryId: prev.categoryId || String(safeCategories[0].id),
+                    }));
                 }
-                setProductVariants(variantsMap);
-            } catch (err) {
-                showToast('Failed to load products', 'error');
+
+                await ensureVariantsLoaded(safeProducts.map((product) => product.product_id));
+            } catch {
+                showToast('Failed to load outfit builder data', 'error');
             }
         };
-        
-        fetchProducts();
+
+        loadData();
     }, [user]);
 
-    // Auto-select outfit if navigated from gallery
     useEffect(() => {
         if (location.state?.viewOutfitId) {
-            setSelectedOutfit(location.state.viewOutfitId);
+            setSelectedOutfitId(location.state.viewOutfitId);
         }
     }, [location]);
 
-    if (!user) return (
-        <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
-            <h2 className="text-2xl font-bold" style={{ marginBottom: 8 }}>Sign in to create outfits</h2>
-            <Link to="/login" className="btn btn-primary btn-lg" style={{ marginTop: 20 }}>Sign In</Link>
-        </div>
-    );
+    useEffect(() => {
+        if (!selectedOutfitId && outfits.length > 0) {
+            setSelectedOutfitId(outfits[0].outfit_id);
+        }
+    }, [outfits, selectedOutfitId]);
 
-    const currentOutfit = outfits.find(o => o.outfit_id === selectedOutfit);
-    const outfitProducts = currentOutfit
-        ? allProducts.filter(p => currentOutfit.products.includes(p.product_id))
-        : [];
-
-    // Handle Save Outfit
-    const handleSaveOutfit = async () => {
-        if (!currentOutfit || !saveForm.name.trim()) {
-            showToast('Outfit name is required', 'error');
+    useEffect(() => {
+        if (!currentOutfit) {
+            setCurrentCategoryId('');
+            setActiveSlot(null);
+            setFilteredProducts([]);
             return;
         }
 
-        if (currentOutfit.products.length === 0) {
-            showToast('Add at least one item before saving', 'error');
+        const remembered = outfitCategoryMap[currentOutfit.outfit_id];
+        if (remembered) {
+            setCurrentCategoryId(String(remembered));
+            setActiveSlot('Tops');
+            setFilteredProducts([]);
             return;
         }
 
-        setSaving(true);
-        try {
-            const payload = {
-                name: saveForm.name.trim(),
-                visibility: saveForm.visibility,
-                department: currentOutfit.department,
-                product_ids: currentOutfit.products,
-                description: currentOutfit.description || ''
-            };
-
-            const result = await apiCall('/outfits/', { method: 'POST' }, payload);
-            
-            showToast(result.message || 'Outfit saved successfully!', 'success');
-            setShowSaveModal(false);
-            setSaveForm({ name: '', visibility: 'private' });
-            
-            // Reload outfits list from API to persist in AppContext
-            await refreshOutfits();
-        } catch (err) {
-            showToast(err.message || 'Failed to save outfit', 'error');
-        } finally {
-            setSaving(false);
+        const explicit = currentOutfit.target_category_id || currentOutfit.targetCategoryId || null;
+        if (explicit) {
+            const explicitId = String(explicit);
+            setCurrentCategoryId(explicitId);
+            setOutfitCategoryMap((prev) => ({ ...prev, [currentOutfit.outfit_id]: explicitId }));
+            setActiveSlot('Tops');
+            setFilteredProducts([]);
+            return;
         }
+
+        const firstProductId = (currentOutfit.products || [])[0];
+        const firstProduct = firstProductId ? productMap.get(firstProductId) : null;
+        const inferredCategoryId = firstProduct?.category_id ? String(firstProduct.category_id) : '';
+        const fallbackCategoryId = categories[0] ? String(categories[0].id) : '';
+        const nextCategoryId = inferredCategoryId || fallbackCategoryId;
+
+        setCurrentCategoryId(nextCategoryId);
+        if (nextCategoryId) {
+            setOutfitCategoryMap((prev) => ({ ...prev, [currentOutfit.outfit_id]: nextCategoryId }));
+        }
+
+        setActiveSlot('Tops');
+        setFilteredProducts([]);
+    }, [currentOutfit?.outfit_id]);
+
+    useEffect(() => {
+        if (!currentOutfit || !activeSlot || !currentCategoryId) {
+            setFilteredProducts([]);
+            return;
+        }
+
+        let cancelled = false;
+
+        const fetchFilteredProducts = async () => {
+            setLoadingPicker(true);
+            try {
+                const categoryIdNum = Number(currentCategoryId);
+                const pieceTypeStr = String(activeSlot).trim();
+
+                // Build query parameters - ensure proper types
+                const params = {
+                    category_id: categoryIdNum,
+                    piece_type: pieceTypeStr,
+                };
+
+                // Debug: Log the fetch request
+                const queryString = new URLSearchParams(params).toString();
+                const fullUrl = `http://localhost:8000/api/products/?${queryString}`;
+                console.log('🔍 Fetching products with URL:', fullUrl);
+                console.log('📋 Parameters:', { categoryIdNum, pieceTypeStr });
+
+                const products = await apiCall('/products/', {}, params);
+
+                if (cancelled) return;
+
+                console.log('✅ Products received:', products);
+                const safeProducts = Array.isArray(products) ? products : [];
+                setFilteredProducts(safeProducts);
+                await ensureVariantsLoaded(safeProducts.map((product) => product.product_id));
+            } catch (err) {
+                if (!cancelled) {
+                    console.error('❌ Fetch error:', err);
+                    setFilteredProducts([]);
+                    showToast('Failed to load products for selected category and slot', 'error');
+                }
+            } finally {
+                if (!cancelled) setLoadingPicker(false);
+            }
+        };
+
+        fetchFilteredProducts();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentOutfit?.outfit_id, currentCategoryId, activeSlot]);
+
+    const handleCategoryChange = (nextCategoryId) => {
+        if (!currentOutfit) return;
+
+        setCurrentCategoryId(nextCategoryId);
+        setOutfitCategoryMap((prev) => ({
+            ...prev,
+            [currentOutfit.outfit_id]: nextCategoryId,
+        }));
+        setActiveSlot('Tops');
+        setFilteredProducts([]);
     };
 
-    // Handle Edit Outfit
-    const handleEditOutfit = async () => {
-        if (!currentOutfit || !saveForm.name.trim()) {
-            showToast('Outfit name is required', 'error');
+    const handleAddToActiveSlot = (product) => {
+        if (!currentOutfit || !activeSlot) return;
+
+        const productPieceType = getPieceType(product);
+        if (!productPieceType || productPieceType.toLowerCase() !== activeSlot.toLowerCase()) {
+            showToast('Selected product does not match the active slot.', 'error');
             return;
         }
 
-        setSaving(true);
-        try {
-            const payload = {
-                name: saveForm.name.trim(),
-                visibility: saveForm.visibility,
-                product_ids: currentOutfit.products,
-                description: currentOutfit.description || ''
-            };
+        const existing = slotProducts[activeSlot];
+        addToOutfit(
+            currentOutfit.outfit_id,
+            product.product_id,
+            activeSlot,
+            existing?.product_id || null
+        );
 
-            const result = await apiCall(`/outfits/${currentOutfit.outfit_id}`, { method: 'PUT' }, payload);
-            
-            showToast(result.message || 'Outfit updated successfully!', 'success');
-            setShowSaveModal(false);
-            setSaveForm({ name: '', visibility: 'private' });
-            setIsEditing(false);
-            
-            // Reload outfits list from API to persist in AppContext
-            await refreshOutfits();
-        } catch (err) {
-            showToast(err.message || 'Failed to update outfit', 'error');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    // Open save modal
-    const openSaveModal = (outfit = null) => {
-        if (outfit) {
-            // Editing existing outfit from list
-            setIsEditing(true);
-            setSaveForm({ name: outfit.name, visibility: outfit.visibility });
-        } else if (currentOutfit?.isSaved) {
-            // Current outfit is already saved - editing it
-            setIsEditing(true);
-            setSaveForm({ name: currentOutfit.name, visibility: currentOutfit.visibility });
+        if (existing && existing.product_id !== product.product_id) {
+            showToast(`${activeSlot} replaced successfully`, 'success');
+        } else if (!existing) {
+            showToast(`${activeSlot} added`, 'success');
         } else {
-            // New outfit - saving for first time
-            setIsEditing(false);
-            setSaveForm({ name: currentOutfit?.name || '', visibility: 'private' });
+            showToast(`${activeSlot} already selected`, 'info');
         }
-        setShowSaveModal(true);
     };
 
-    // Handle creating a new outfit from the modal
-    const handleCreate = () => {
-        if (!newOutfit.name.trim()) {
+    const handleCreateOutfit = () => {
+        if (!createForm.name.trim()) {
             showToast('Outfit name is required', 'error');
             return;
         }
 
-        createOutfit({
-            name: newOutfit.name.trim(),
-            description: newOutfit.description,
-            department: newOutfit.department,
-            visibility: newOutfit.visibility,
+        if (!createForm.categoryId) {
+            showToast('Category is required', 'error');
+            return;
+        }
+
+        const categoryId = String(createForm.categoryId);
+        const createdOutfit = createOutfit({
+            name: createForm.name.trim(),
+            description: createForm.description,
+            visibility: createForm.visibility,
+            target_category_id: Number(categoryId),
+            targetCategoryId: Number(categoryId),
         });
 
-        // Find the newly created outfit and select it
-        const newOutfits = outfits;
-        const createdOutfit = newOutfits[newOutfits.length - 1];
-        if (createdOutfit) {
-            setSelectedOutfit(createdOutfit.outfit_id);
+        if (createdOutfit?.outfit_id) {
+            setSelectedOutfitId(createdOutfit.outfit_id);
+            setCurrentCategoryId(categoryId);
+            setOutfitCategoryMap((prev) => ({
+                ...prev,
+                [createdOutfit.outfit_id]: categoryId,
+            }));
+            setActiveSlot('Tops');
+            setFilteredProducts([]);
         }
 
-        // Reset and close
-        setNewOutfit({ name: '', description: '', visibility: 'public', department: 'Women' });
-        setShowCreate(false);
-        showToast('Outfit created! Now add items.', 'success');
+        setCreateForm({
+            name: '',
+            description: '',
+            visibility: 'public',
+            categoryId: categories[0] ? String(categories[0].id) : '',
+        });
+        setShowCreateModal(false);
     };
 
-    // VALIDATION RULE 2: Strict Slot-to-Category Mapping
-    // When user clicks "Add X", fetch only products matching that category
-    const handleOpenProductPicker = async (pieceType) => {
+    const handleSaveOutfit = async () => {
         if (!currentOutfit) return;
-        
+        if ((currentOutfit.products || []).length === 0) {
+            showToast('Add at least one product before saving', 'error');
+            return;
+        }
+
+        setSavingOutfit(true);
         try {
-            // Fetch products filtered by outfit_slot AND department
-            const params = new URLSearchParams();
-            params.append('outfit_slot', pieceType);
-            if (currentOutfit.department) {
-                params.append('department', currentOutfit.department);
+            // Build clean product_ids array - only valid product IDs
+            const productIds = (currentOutfit.products || []).filter(id => id != null && id !== '');
+
+            const payload = {
+                name: currentOutfit.name,
+                description: currentOutfit.description || '',
+                visibility: currentOutfit.visibility || 'private',
+                category_id: currentCategoryId ? Number(currentCategoryId) : null,
+                product_ids: productIds,
+            };
+
+            console.log('📤 Saving outfit with payload:', payload);
+
+            let result;
+            if (currentOutfit.isSaved) {
+                console.log(`🔄 Updating outfit ${currentOutfit.outfit_id}`);
+                result = await apiCall(`/outfits/${currentOutfit.outfit_id}`, { method: 'PUT' }, payload);
+            } else {
+                console.log('✨ Creating new outfit');
+                result = await apiCall('/outfits/', { method: 'POST' }, payload);
             }
-            
-            const products = await apiCall(`/products/?${params.toString()}`);
-            setFilteredProducts(products);
-            setAddingType(pieceType);
+
+            console.log('✅ Save response:', result);
+            await refreshOutfits();
+
+            if (result?.outfit_id) {
+                setSelectedOutfitId(result.outfit_id);
+                if (currentCategoryId) {
+                    setOutfitCategoryMap((prev) => ({
+                        ...prev,
+                        [result.outfit_id]: currentCategoryId,
+                    }));
+                }
+            }
+
+            showToast('Outfit saved successfully', 'success');
         } catch (err) {
-            showToast('Failed to load products for this slot', 'error');
+            console.error('❌ Save error:', err);
+            showToast(err.message || 'Failed to save outfit', 'error');
+        } finally {
+            setSavingOutfit(false);
         }
     };
 
-    // VALIDATION RULE 3: Prevent Duplicates (handled in AppContext addToOutfit)
-    const handleAddToOutfit = (product) => {
-        if (!currentOutfit) return;
-
-        // If first product, lock the department
-        if (currentOutfit.products.length === 0) {
-            addToOutfit(currentOutfit.outfit_id, product.product_id, product.department);
-        } else {
-            // Validate department match (this is also in AppContext, but we can show better error)
-            if (product.department !== currentOutfit.department) {
-                showToast(
-                    `Cannot add ${product.department} item to ${currentOutfit.department} outfit`,
-                    'error'
-                );
-                return;
-            }
-            addToOutfit(currentOutfit.outfit_id, product.product_id, product.department);
-        }
-
-        setAddingType(null);
-    };
+    if (!user) {
+        return (
+            <div style={{ minHeight: '100vh', background: 'var(--clr-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--sp-6)' }}>
+                <div style={{ maxWidth: '36rem', margin: '0 auto', textAlign: 'center' }}>
+                    <h2 style={{ fontSize: '32px', fontWeight: 700, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)' }}>Sign in to build outfits</h2>
+                    <p style={{ color: 'var(--clr-text-2)', marginBottom: 'var(--sp-8)' }}>Create slot-based looks in your account.</p>
+                    <Link
+                        to="/login"
+                        className="btn btn-primary btn-lg"
+                    >
+                        Sign In
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="page">
-            <div className="container">
-                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-8)' }}>
+        <div style={{ minHeight: '100vh', background: 'var(--clr-bg)' }}>
+            <div style={{ maxWidth: '1360px', margin: '0 auto', padding: '32px 24px', paddingBottom: '40px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '32px' }}>
                     <div>
-                        <h1 className="text-3xl font-bold">Outfit Builder</h1>
-                        <p className="text-muted">Mix and match pieces to create your perfect look</p>
+                        <h1 style={{ fontSize: '32px', fontWeight: 700, color: 'var(--clr-text)', marginBottom: 'var(--sp-3)' }}>Outfit Builder</h1>
+                        <p style={{ fontSize: '14px', color: 'var(--clr-text-2)' }}>Craft your perfect outfit, one slot at a time. Add pieces strategically to build cohesive looks.</p>
                     </div>
-                    <button className="btn btn-primary" onClick={() => setShowCreate(true)} id="create-outfit-btn">
-                        <Plus size={16} /> New Outfit
+                    <button
+                        type="button"
+                        onClick={() => setShowCreateModal(true)}
+                        className="btn btn-primary"
+                        style={{ flexShrink: 0 }}
+                    >
+                        <Plus size={16} />
+                        New Outfit
                     </button>
                 </div>
 
-                <div className="outfit-grid">
-                    {/* Outfits list */}
-                    <div>
-                        <h3 className="font-bold" style={{ marginBottom: 'var(--sp-4)', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)' }}>My Outfits</h3>
-                        {outfits.length === 0 && (
-                            <div className="text-center" style={{ padding: 'var(--sp-10) 0' }}>
-                                <p className="text-muted text-sm">No outfits yet. Create your first!</p>
-                            </div>
-                        )}
-                        <div className="flex-col" style={{ gap: 'var(--sp-3)' }}>
-                            {outfits.map(o => (
-                                <div key={o.outfit_id} className={`outfit-item${selectedOutfit === o.outfit_id ? ' active' : ''}`}
-                                    onClick={() => setSelectedOutfit(s => s === o.outfit_id ? null : o.outfit_id)}
-                                    id={`outfit-item-${o.outfit_id}`}>
-                                    <div style={{ flex: 1 }}>
-                                        <div className="font-semibold text-sm">{o.name}</div>
-                                        <div className="text-xs text-faint">
-                                            {o.department && <span className="badge badge-info" style={{ fontSize: 9, marginRight: 6 }}>{o.department}</span>}
-                                            {o.products.length} pieces · {new Date(o.createdAt || Date.now()).toLocaleDateString()}
+                <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: 'var(--sp-6)', boxShadow: 'var(--shadow-sm)', marginBottom: '24px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-4)' }}>My Outfits</div>
+                    {outfits.length === 0 ? (
+                        <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', background: 'rgba(255,255,255,0.02)', padding: 'var(--sp-6)', textAlign: 'center' }}>
+                            <p style={{ fontSize: '14px', color: 'var(--clr-text-2)', marginBottom: 'var(--sp-4)' }}>No outfits yet. Create your first one.</p>
+                            <button
+                                type="button"
+                                onClick={() => setShowCreateModal(true)}
+                                className="btn btn-primary"
+                            >
+                                <Plus size={14} />
+                                Create Outfit
+                            </button>
+                        </div>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-4)' }}>
+                            {outfits.map((outfit) => (
+                                <button
+                                    key={outfit.outfit_id}
+                                    type="button"
+                                    onClick={() => setSelectedOutfitId(outfit.outfit_id)}
+                                    style={{
+                                        background: 'var(--clr-surface-2)',
+                                        border: `1.5px solid ${selectedOutfitId === outfit.outfit_id ? 'var(--clr-primary)' : 'var(--clr-border)'}`,
+                                        borderRadius: 'var(--r-xl)',
+                                        padding: 'var(--sp-4)',
+                                        textAlign: 'left',
+                                        transition: 'all var(--tr-fast)',
+                                        cursor: 'pointer',
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--clr-primary)'}
+                                    onMouseLeave={(e) => e.currentTarget.style.borderColor = selectedOutfitId === outfit.outfit_id ? 'var(--clr-primary)' : 'var(--clr-border)'}
+                                >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)' }}>{outfit.name}</div>
+                                            <div style={{ fontSize: '12px', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-3)' }}>
+                                                {(outfit.products || []).length} item{(outfit.products || []).length !== 1 ? 's' : ''} • {getOutfitDateLabel(outfit)}
+                                            </div>
+                                            <div className="badge badge-muted" style={{ fontSize: '10px' }}>
+                                                {outfit.visibility === 'public' ? <Eye size={10} /> : <Lock size={10} />}
+                                                {(outfit.visibility || 'private').charAt(0).toUpperCase() + (outfit.visibility || 'private').slice(1)}
+                                            </div>
                                         </div>
+                                        <button
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                color: 'var(--clr-text-3)',
+                                                padding: 'var(--sp-2)',
+                                                cursor: 'pointer',
+                                                fontSize: '16px',
+                                                transition: 'color var(--tr-fast)',
+                                            }}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                deleteOutfit(outfit.outfit_id);
+                                                if (selectedOutfitId === outfit.outfit_id) {
+                                                    setSelectedOutfitId(null);
+                                                    setActiveSlot(null);
+                                                    setFilteredProducts([]);
+                                                }
+                                            }}
+                                            onMouseEnter={(e) => e.currentTarget.style.color = 'var(--clr-error)'}
+                                            onMouseLeave={(e) => e.currentTarget.style.color = 'var(--clr-text-3)'}
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className={`badge ${o.visibility === 'public' ? 'badge-success' : 'badge-muted'}`} style={{ fontSize: 10 }}>
-                                            {o.visibility === 'public' ? <Eye size={9} /> : <Lock size={9} />} {o.visibility}
-                                        </span>
-                                        <button className="btn btn-ghost btn-icon btn-sm" onClick={async e => { e.stopPropagation(); await deleteOutfit(o.outfit_id); if (selectedOutfit === o.outfit_id) setSelectedOutfit(null); }}
-                                            aria-label="Delete outfit"><Trash2 size={13} color="var(--clr-error)" /></button>
-                                    </div>
-                                </div>
+                                </button>
                             ))}
                         </div>
+                    )}
+                </div>
+
+                {!currentOutfit ? (
+                    <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: '40px var(--sp-6)', boxShadow: 'var(--shadow-sm)', textAlign: 'center' }}>
+                        <Package size={40} style={{ color: 'var(--clr-text-3)', margin: '0 auto', marginBottom: 'var(--sp-4)' }} />
+                        <p style={{ fontSize: '18px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)' }}>Select an outfit to start</p>
+                        <p style={{ fontSize: '14px', color: 'var(--clr-text-2)', marginBottom: 'var(--sp-6)' }}>Pick an existing outfit or create a new one to begin building your look.</p>
+                        <button
+                            type="button"
+                            onClick={() => setShowCreateModal(true)}
+                            className="btn btn-primary"
+                        >
+                            <Plus size={16} />
+                            Create New Outfit
+                        </button>
                     </div>
-
-                    {/* Outfit canvas */}
-                    <div>
-                        {!currentOutfit ? (
-                            <div className="card card-body text-center" style={{ padding: 'var(--sp-16)', height: '100%' }}>
-                                <Package size={48} color="var(--clr-text-3)" style={{ margin: '0 auto 16px' }} />
-                                <p className="font-semibold">Select an outfit to edit</p>
-                                <p className="text-sm text-muted">or create a new one</p>
-                                <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={() => setShowCreate(true)}>
-                                    <Plus size={16} /> Create Outfit
-                                </button>
+                ) : (
+                    <div style={{ display: 'grid', gap: '24px', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', '@media (min-width: 1024px)': { gridTemplateColumns: '1fr 1.2fr' } }}>
+                        <section style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: 'var(--sp-6)', boxShadow: 'var(--shadow-sm)' }}>
+                            <div style={{ marginBottom: 'var(--sp-4)' }}>
+                                <h2 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Product Selection</h2>
+                                <p style={{ fontSize: '14px', color: 'var(--clr-text-2)' }}>
+                                    {activeSlot ? `Browse ${activeSlot.toLowerCase()} in the current category` : 'Click a slot button to load products'}
+                                </p>
                             </div>
-                        ) : (
-                            <div>
-                                <div className="flex items-center justify-between" style={{ marginBottom: 'var(--sp-6)' }}>
-                                    <div style={{ flex: 1 }}>
-                                        <h2 className="text-xl font-bold">{currentOutfit.name}</h2>
-                                        {currentOutfit.description && <p className="text-sm text-muted">{currentOutfit.description}</p>}
-                                    </div>
-                                    {/* Target Group Lock Indicator */}
-                                    {currentOutfit.department && (
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: 'rgba(192,132,252,0.1)', borderRadius: 'var(--r-md)', marginLeft: 'var(--sp-4)' }}>
-                                            <Lock size={14} color="var(--clr-primary)" />
-                                            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--clr-primary)' }}>
-                                                {currentOutfit.department} only
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
 
-                                {/* Save/Edit Actions */}
-                                <div style={{ 
-                                    display: 'flex', 
-                                    gap: 'var(--sp-3)', 
-                                    marginBottom: 'var(--sp-6)',
-                                    flexWrap: 'wrap'
-                                }}>
-                                    <button 
-                                        onClick={() => openSaveModal()}
-                                        style={{
-                                            padding: '12px 28px',
-                                            background: 'var(--grad-primary)',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            fontSize: '15px',
-                                            fontWeight: '700',
-                                            cursor: 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '8px',
-                                            transition: 'all 0.3s ease',
-                                            boxShadow: '0 4px 15px rgba(192, 132, 252, 0.4)',
-                                            minWidth: '160px',
-                                            justifyContent: 'center'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.target.style.transform = 'translateY(-3px)';
-                                            e.target.style.boxShadow = '0 6px 20px rgba(192, 132, 252, 0.6)';
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.target.style.transform = 'translateY(0)';
-                                            e.target.style.boxShadow = '0 4px 15px rgba(192, 132, 252, 0.4)';
-                                        }}
+                            {activeSlot && (
+                                <div className="badge badge-primary" style={{ marginBottom: 'var(--sp-4)' }}>
+                                    <span style={{ fontSize: '11px' }}>Active Slot: {activeSlot}</span>
+                                </div>
+                            )}
+
+                            {!currentCategoryId ? (
+                                <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', padding: 'var(--sp-6)', textAlign: 'center', color: 'var(--clr-text-3)' }}>
+                                    <p style={{ fontSize: '13px' }}>Select a category first from the right panel.</p>
+                                </div>
+                            ) : !activeSlot ? (
+                                <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', padding: 'var(--sp-6)', textAlign: 'center', color: 'var(--clr-text-3)' }}>
+                                    <p style={{ fontSize: '13px' }}>Click a slot button to load products.</p>
+                                </div>
+                            ) : loadingPicker ? (
+                                <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', padding: 'var(--sp-6)', textAlign: 'center', color: 'var(--clr-text-2)' }}>
+                                    <p style={{ fontSize: '13px' }}>Loading {activeSlot.toLowerCase()} products...</p>
+                                </div>
+                            ) : filteredProducts.length === 0 ? (
+                                <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', background: 'rgba(251, 191, 36, 0.04)', padding: 'var(--sp-6)', textAlign: 'center', color: 'var(--clr-warning)' }}>
+                                    <p style={{ fontSize: '13px' }}>No products found for this category and slot.</p>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'grid', gap: 'var(--sp-3)', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                                    {filteredProducts.map((product) => {
+                                        const variant = variantsByProductId[product.product_id]?.[0];
+                                        const image = variant?.images?.[0];
+                                        const slotName = getPieceType(product) || activeSlot;
+                                        const isCurrent = slotProducts[activeSlot]?.product_id === product.product_id;
+
+                                        return (
+                                            <div key={product.product_id} style={{ background: 'var(--clr-surface-2)', borderRadius: 'var(--r-lg)', border: '1px solid var(--clr-border)', overflow: 'hidden', transition: 'all var(--tr-fast)' }}>
+                                                <div style={{ aspectRatio: '3/4', background: 'var(--clr-bg-2)', overflow: 'hidden' }}>
+                                                    {image ? (
+                                                        <img src={image} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                    ) : (
+                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--clr-text-3)' }}>
+                                                            <Package size={24} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div style={{ padding: 'var(--sp-3)' }}>
+                                                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)', lineHeight: '1.4', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
+                                                    <div style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>${Number(product.price || 0).toFixed(2)}</div>
+                                                    <div className="badge badge-primary" style={{ marginBottom: 'var(--sp-3)', fontSize: '10px', display: 'inline-flex' }}>
+                                                        <span>{slotName}</span>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAddToActiveSlot(product)}
+                                                        className={isCurrent ? 'btn btn-sm' : 'btn btn-primary btn-sm'}
+                                                        style={{ width: '100%', justifyContent: 'center', background: isCurrent ? 'var(--clr-success)' : undefined }}
+                                                        disabled={isCurrent}
+                                                    >
+                                                        {isCurrent ? 'In Slot' : `Use`}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+
+                        <section style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-6)' }}>
+                            <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: 'var(--sp-6)', boxShadow: 'var(--shadow-sm)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 'var(--sp-4)' }}>
+                                    <div>
+                                        <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-1)' }}>{currentOutfit.name}</h2>
+                                        <p style={{ fontSize: '13px', color: 'var(--clr-text-2)' }}>Slot-based outfit workspace</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveOutfit}
+                                        disabled={savingOutfit}
+                                        className="btn btn-primary btn-sm"
                                     >
-                                        <Save size={18} style={{ color: 'white' }} />
-                                        <span>{currentOutfit?.isSaved ? 'Edit & Save' : 'Save Outfit'}</span>
+                                        <Save size={14} />
+                                        {savingOutfit ? 'Saving...' : 'Save'}
                                     </button>
                                 </div>
 
-                                {/* Outfit pieces visual */}
-                                <div className="outfit-canvas">
-                                    {PIECE_TYPES.map(pt => {
-                                        const piece = outfitProducts.find(p => (p.outfit_slot || '').toLowerCase() === pt.toLowerCase());
-                                        const variant = piece && productVariants[piece.product_id]?.[0];
+                                <div style={{ display: 'grid', gap: 'var(--sp-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Category</label>
+                                        <select
+                                            value={currentCategoryId}
+                                            onChange={(event) => handleCategoryChange(event.target.value)}
+                                            style={{
+                                                width: '100%',
+                                                background: 'var(--clr-bg-2)',
+                                                border: '1.5px solid var(--clr-border)',
+                                                borderRadius: 'var(--r-md)',
+                                                padding: '10px 12px',
+                                                color: 'var(--clr-text)',
+                                                fontSize: '13px',
+                                                fontWeight: 500,
+                                                cursor: 'pointer',
+                                                transition: 'all var(--tr-fast)',
+                                            }}
+                                        >
+                                            <option value="">Select category</option>
+                                            {categories.map((category) => (
+                                                <option key={category.id} value={category.id}>{category.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Active Slot</label>
+                                        <div style={{ display: 'flex', alignItems: 'center', height: '42px', background: 'var(--clr-bg-2)', border: '1.5px solid var(--clr-border)', borderRadius: 'var(--r-md)', padding: '10px 12px', color: 'var(--clr-text-2)', fontSize: '13px' }}>
+                                            {activeSlot || 'None selected'}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: 'var(--sp-6)', boxShadow: 'var(--shadow-sm)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+                                    <h3 style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)' }}>Outfit Slots</h3>
+                                    <div className="badge badge-muted" style={{ gap: '4px' }}>
+                                        <Sparkles size={11} />
+                                        <span style={{ fontSize: '10px' }}>One per slot</span>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gap: 'var(--sp-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+                                    {PIECE_TYPES.map((slot) => {
+                                        const selectedProduct = slotProducts[slot] || null;
+                                        const variant = selectedProduct ? variantsByProductId[selectedProduct.product_id]?.[0] : null;
                                         const image = variant?.images?.[0];
-                                        
+                                        const isActive = activeSlot === slot;
+
                                         return (
-                                            <div key={pt} className="outfit-slot">
-                                                <div className="outfit-slot-label">{pt.toUpperCase()}</div>
-                                                {piece ? (
-                                                    <div className="outfit-slot-piece">
-                                                        {image ? (
-                                                            <img src={image} alt={piece.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                        ) : (
-                                                            <div style={{ width: '100%', height: '100%', background: 'var(--clr-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                <Package size={24} color="var(--clr-border)" />
-                                                            </div>
-                                                        )}
-                                                        <div className="outfit-slot-overlay">
-                                                            <button className="btn btn-danger btn-sm" onClick={() => removeFromOutfit(currentOutfit.outfit_id, piece.product_id)}>
-                                                                <X size={13} /> Remove
+                                            <div
+                                                key={slot}
+                                                style={{
+                                                    borderRadius: 'var(--r-lg)',
+                                                    border: `2px ${isActive ? 'solid' : 'dashed'} ${isActive ? 'var(--clr-primary)' : 'var(--clr-border-2)'}`,
+                                                    background: `${isActive ? 'rgba(192, 132, 252, 0.05)' : 'transparent'}`,
+                                                    padding: 'var(--sp-3)',
+                                                    transition: 'all var(--tr-fast)',
+                                                    cursor: 'pointer',
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (!selectedProduct) {
+                                                        e.currentTarget.style.borderStyle = 'solid';
+                                                        e.currentTarget.style.borderColor = 'var(--clr-primary)';
+                                                        e.currentTarget.style.background = 'rgba(192, 132, 252, 0.05)';
+                                                    }
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    if (!isActive && !selectedProduct) {
+                                                        e.currentTarget.style.borderStyle = 'dashed';
+                                                        e.currentTarget.style.borderColor = 'var(--clr-border-2)';
+                                                        e.currentTarget.style.background = 'transparent';
+                                                    }
+                                                }}
+                                            >
+                                                <div className="badge badge-primary" style={{ marginBottom: 'var(--sp-2)', display: 'inline-flex', fontSize: '10px' }}>
+                                                    {slot}
+                                                </div>
+
+                                                {selectedProduct ? (
+                                                    <>
+                                                        <div style={{ aspectRatio: '1/1', overflow: 'hidden', borderRadius: 'var(--r-md)', border: '1px solid var(--clr-border)', background: 'var(--clr-bg-2)', marginBottom: 'var(--sp-2)' }}>
+                                                            {image ? (
+                                                                <img src={image} alt={selectedProduct.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                            ) : (
+                                                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--clr-text-3)' }}>
+                                                                    <Package size={20} />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <p style={{ fontSize: '11px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)', lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{selectedProduct.name}</p>
+                                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-2)' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setActiveSlot(slot)}
+                                                                className="btn btn-sm btn-ghost"
+                                                                style={{ fontSize: '11px' }}
+                                                            >
+                                                                Change
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeFromOutfit(currentOutfit.outfit_id, selectedProduct.product_id)}
+                                                                className="btn btn-sm btn-danger"
+                                                                style={{ fontSize: '11px' }}
+                                                            >
+                                                                Remove
                                                             </button>
                                                         </div>
-                                                        <div className="outfit-slot-name">{piece.name}</div>
-                                                    </div>
+                                                    </>
                                                 ) : (
-                                                    <button 
-                                                        className="outfit-slot-empty" 
-                                                        onClick={() => handleOpenProductPicker(pt)}
-                                                        id={`add-${pt.toLowerCase()}-btn`}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setActiveSlot(slot)}
+                                                        style={{
+                                                            display: 'flex',
+                                                            flexDirection: 'column',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            height: '120px',
+                                                            width: '100%',
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            color: 'var(--clr-text-2)',
+                                                            fontSize: '12px',
+                                                            fontWeight: 600,
+                                                            cursor: 'pointer',
+                                                            gap: 'var(--sp-2)',
+                                                            transition: 'color var(--tr-fast)',
+                                                        }}
+                                                        onMouseEnter={(e) => e.currentTarget.style.color = 'var(--clr-primary)'}
+                                                        onMouseLeave={(e) => e.currentTarget.style.color = 'var(--clr-text-2)'}
                                                     >
-                                                        <Plus size={20} /> Add {pt}
+                                                        <Plus size={20} />
+                                                        <span>Add {slot}</span>
                                                     </button>
                                                 )}
                                             </div>
@@ -381,75 +729,142 @@ export default function OutfitBuilderPage() {
                                     })}
                                 </div>
                             </div>
-                        )}
+                        </section>
                     </div>
-                </div>
+                )}
             </div>
 
-            {/* Create outfit modal */}
-            {showCreate && (
-                <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <span className="font-bold">New Outfit</span>
-                            <button onClick={() => setShowCreate(false)}><X size={20} /></button>
+            {showCreateModal && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', padding: 'var(--sp-4)', backdropFilter: 'blur(4px)' }} onClick={() => setShowCreateModal(false)}>
+                    <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', boxShadow: 'var(--shadow-xl)', maxWidth: '480px', width: '100%' }} onClick={(event) => event.stopPropagation()}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--clr-border)', padding: 'var(--sp-5)', paddingBottom: 'var(--sp-4)' }}>
+                            <h3 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--clr-text)' }}>Create Outfit</h3>
+                            <button type="button" onClick={() => setShowCreateModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--clr-text-3)', cursor: 'pointer', padding: 'var(--sp-2)', fontSize: '18px', transition: 'color var(--tr-fast)' }} onMouseEnter={(e) => e.currentTarget.style.color = 'var(--clr-text)'} onMouseLeave={(e) => e.currentTarget.style.color = 'var(--clr-text-3)'}>
+                                <X size={20} />
+                            </button>
                         </div>
-                        <div className="modal-body flex-col" style={{ gap: 16 }}>
-                            <div className="form-group">
-                                <label className="form-label">Outfit Name *</label>
-                                <input 
-                                    id="outfit-name-input" 
-                                    className="form-input" 
-                                    placeholder="e.g. Office Chic" 
-                                    value={newOutfit.name} 
-                                    onChange={e => setNewOutfit(p => ({ ...p, name: e.target.value }))} 
+
+                        <div style={{ padding: 'var(--sp-5)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Outfit Name</label>
+                                <input
+                                    value={createForm.name}
+                                    onChange={(event) => setCreateForm((prev) => ({ ...prev, name: event.target.value }))}
+                                    placeholder="e.g. Weekend Vibes"
+                                    style={{
+                                        width: '100%',
+                                        background: 'var(--clr-bg-2)',
+                                        border: '1.5px solid var(--clr-border)',
+                                        borderRadius: 'var(--r-md)',
+                                        padding: 'var(--sp-3) var(--sp-4)',
+                                        color: 'var(--clr-text)',
+                                        fontSize: '14px',
+                                        fontFamily: 'inherit',
+                                        outline: 'none',
+                                        transition: 'all var(--tr-fast)',
+                                    }}
+                                    onFocus={(e) => e.currentTarget.style.borderColor = 'var(--clr-primary)'}
+                                    onBlur={(e) => e.currentTarget.style.borderColor = 'var(--clr-border)'}
                                 />
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Target Department *</label>
-                                <select 
-                                    className="form-select" 
-                                    value={newOutfit.department} 
-                                    onChange={e => setNewOutfit(p => ({ ...p, department: e.target.value }))}
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Category</label>
+                                <select
+                                    value={createForm.categoryId}
+                                    onChange={(event) => setCreateForm((prev) => ({ ...prev, categoryId: event.target.value }))}
+                                    style={{
+                                        width: '100%',
+                                        background: 'var(--clr-bg-2)',
+                                        border: '1.5px solid var(--clr-border)',
+                                        borderRadius: 'var(--r-md)',
+                                        padding: 'var(--sp-3) var(--sp-4)',
+                                        color: 'var(--clr-text)',
+                                        fontSize: '14px',
+                                        fontFamily: 'inherit',
+                                        cursor: 'pointer',
+                                        outline: 'none',
+                                        transition: 'all var(--tr-fast)',
+                                    }}
+                                    onFocus={(e) => e.currentTarget.style.borderColor = 'var(--clr-primary)'}
+                                    onBlur={(e) => e.currentTarget.style.borderColor = 'var(--clr-border)'}
                                 >
-                                    {TARGET_GROUPS.map(tg => (
-                                        <option key={tg} value={tg}>{tg}</option>
+                                    <option value="">Select category</option>
+                                    {categories.map((category) => (
+                                        <option key={category.id} value={category.id}>{category.name}</option>
                                     ))}
                                 </select>
-                                <p style={{ fontSize: 12, color: 'var(--clr-text-3)', marginTop: 4 }}>
-                                    This locks your outfit to {newOutfit.department} items only. You can't mix with other departments.
-                                </p>
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Description</label>
-                                <textarea 
-                                    className="form-textarea" 
-                                    placeholder="Describe your outfit…" 
-                                    value={newOutfit.description} 
-                                    onChange={e => setNewOutfit(p => ({ ...p, description: e.target.value }))} 
-                                    style={{ minHeight: 80 }} 
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Description (Optional)</label>
+                                <textarea
+                                    value={createForm.description}
+                                    onChange={(event) => setCreateForm((prev) => ({ ...prev, description: event.target.value }))}
+                                    rows={3}
+                                    placeholder="Add notes about this outfit..."
+                                    style={{
+                                        width: '100%',
+                                        background: 'var(--clr-bg-2)',
+                                        border: '1.5px solid var(--clr-border)',
+                                        borderRadius: 'var(--r-md)',
+                                        padding: 'var(--sp-3) var(--sp-4)',
+                                        color: 'var(--clr-text)',
+                                        fontSize: '14px',
+                                        fontFamily: 'inherit',
+                                        resize: 'vertical',
+                                        outline: 'none',
+                                        transition: 'all var(--tr-fast)',
+                                    }}
+                                    onFocus={(e) => e.currentTarget.style.borderColor = 'var(--clr-primary)'}
+                                    onBlur={(e) => e.currentTarget.style.borderColor = 'var(--clr-border)'}
                                 />
                             </div>
-                            <div className="form-group">
-                                <label className="form-label">Visibility</label>
-                                <select 
-                                    className="form-select" 
-                                    value={newOutfit.visibility} 
-                                    onChange={e => setNewOutfit(p => ({ ...p, visibility: e.target.value }))}
+
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Visibility</label>
+                                <select
+                                    value={createForm.visibility}
+                                    onChange={(event) => setCreateForm((prev) => ({ ...prev, visibility: event.target.value }))}
+                                    style={{
+                                        width: '100%',
+                                        background: 'var(--clr-bg-2)',
+                                        border: '1.5px solid var(--clr-border)',
+                                        borderRadius: 'var(--r-md)',
+                                        padding: 'var(--sp-3) var(--sp-4)',
+                                        color: 'var(--clr-text)',
+                                        fontSize: '14px',
+                                        fontFamily: 'inherit',
+                                        cursor: 'pointer',
+                                        outline: 'none',
+                                        transition: 'all var(--tr-fast)',
+                                    }}
+                                    onFocus={(e) => e.currentTarget.style.borderColor = 'var(--clr-primary)'}
+                                    onBlur={(e) => e.currentTarget.style.borderColor = 'var(--clr-border)'}
                                 >
-                                    <option value="public">Public — visible to everyone</option>
-                                    <option value="private">Private — only visible to you</option>
+                                    <option value="public">Public (Others can see)</option>
+                                    <option value="private">Private (Only you)</option>
                                 </select>
                             </div>
                         </div>
-                        <div className="modal-footer">
-                            <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
-                            <button 
-                                id="confirm-create-outfit" 
-                                className="btn btn-primary" 
-                                onClick={handleCreate} 
-                                disabled={!newOutfit.name}
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-3)', borderTop: '1px solid var(--clr-border)', padding: 'var(--sp-5)', paddingTop: 'var(--sp-4)' }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowCreateModal(false)}
+                                className="btn btn-ghost"
+                                style={{ fontSize: '13px' }}
                             >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCreateOutfit}
+                                disabled={!createForm.name.trim() || !createForm.categoryId}
+                                className="btn btn-primary"
+                                style={{ fontSize: '13px' }}
+                            >
+                                <Plus size={14} />
                                 Create Outfit
                             </button>
                         </div>
@@ -457,168 +872,6 @@ export default function OutfitBuilderPage() {
                 </div>
             )}
 
-            {/* Add product picker modal - VALIDATION RULES APPLIED */}
-            {addingType && currentOutfit && (
-                <div className="modal-overlay" onClick={() => setAddingType(null)}>
-                    <div className="modal" style={{ maxWidth: 800 }} onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <div>
-                                <span className="font-bold">Choose a {addingType}</span>
-                                {currentOutfit.department && (
-                                    <p style={{ fontSize: 12, color: 'var(--clr-text-3)', marginTop: 4 }}>
-                                        <Lock size={12} style={{ display: 'inline-block', marginRight: 4, verticalAlign: 'middle' }} />
-                                        Showing {currentOutfit.department} items only
-                                    </p>
-                                )}
-                            </div>
-                            <button onClick={() => setAddingType(null)}><X size={20} /></button>
-                        </div>
-                        <div className="modal-body">
-                            {filteredProducts.length === 0 ? (
-                                <div className="text-center" style={{ padding: 'var(--sp-8) 0' }}>
-                                    <AlertCircle size={32} color="var(--clr-warning)" style={{ margin: '0 auto 12px' }} />
-                                    <p className="text-muted">
-                                        No {addingType.toLowerCase()} available for {currentOutfit.department || 'your outfit'}
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="grid-4 grid" style={{ gap: 'var(--sp-4)' }}>
-                                    {filteredProducts.map(p => {
-                                        // VALIDATION 3: Highlight if product is already in outfit
-                                        const isInOutfit = currentOutfit.products.includes(p.product_id);
-                                        const variant = productVariants[p.product_id]?.[0];
-                                        const image = variant?.images?.[0];
-                                        
-                                        return (
-                                            <button 
-                                                key={p.product_id} 
-                                                className="product-picker-item" 
-                                                onClick={() => handleAddToOutfit(p)}
-                                                disabled={isInOutfit}
-                                                style={{ opacity: isInOutfit ? 0.6 : 1, cursor: isInOutfit ? 'not-allowed' : 'pointer' }}
-                                                title={isInOutfit ? 'Already in outfit' : ''}
-                                            >
-                                                <div style={{ width: '100%', aspectRatio: '3/4', background: 'var(--clr-surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
-                                                    {image ? (
-                                                        <img src={image} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        <Package size={32} color="var(--clr-border)" />
-                                                    )}
-                                                    {isInOutfit && (
-                                                        <div style={{ position: 'absolute', top: 8, right: 8, background: 'var(--clr-warning)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                            <span style={{ fontSize: 12, fontWeight: 'bold', color: 'white' }}>✓</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div style={{ padding: '0 var(--sp-3)', marginTop: 'var(--sp-2)' }}>
-                                                    <div className="text-xs font-semibold" style={{ marginTop: 6, textAlign: 'left' }}>{p.name}</div>
-                                                    <div className="text-xs text-primary">${Number(p.price).toFixed(2)}</div>
-                                                    {variant && (
-                                                        <div className="text-xs text-faint" style={{ marginTop: 4 }}>
-                                                            {variant.color && <span>{variant.color} · </span>}
-                                                            {variant.size && <span>{variant.size}</span>}
-                                                        </div>
-                                                    )}
-                                                    {isInOutfit && (
-                                                        <div style={{ fontSize: 10, color: 'var(--clr-warning)', fontWeight: 500, marginTop: 4 }}>
-                                                            In outfit
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Save/Edit Outfit Modal */}
-            {showSaveModal && (
-                <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <span className="font-bold">{isEditing ? 'Edit Outfit' : 'Save Outfit'}</span>
-                            <button onClick={() => setShowSaveModal(false)}><X size={20} /></button>
-                        </div>
-                        <div className="modal-body flex-col" style={{ gap: 16 }}>
-                            <div className="form-group">
-                                <label className="form-label">Outfit Name *</label>
-                                <input 
-                                    id="outfit-name-save" 
-                                    className="form-input" 
-                                    placeholder="e.g. Business Casual" 
-                                    value={saveForm.name}
-                                    onChange={e => setSaveForm(p => ({ ...p, name: e.target.value }))}
-                                    disabled={saving}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label">Visibility</label>
-                                <select 
-                                    className="form-select"
-                                    value={saveForm.visibility}
-                                    onChange={e => setSaveForm(p => ({ ...p, visibility: e.target.value }))}
-                                    disabled={saving}
-                                >
-                                    <option value="private">Private — only you can see</option>
-                                    <option value="public">Public — visible to everyone</option>
-                                </select>
-                            </div>
-                            <div style={{ padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: 'var(--r-lg)', border: '1px solid rgba(59,130,246,0.2)' }}>
-                                <p style={{ fontSize: 12, color: 'var(--clr-text-2)', margin: 0 }}>
-                                    📊 {currentOutfit?.products.length || 0} item(s) · 🔒 {currentOutfit?.department || 'Unknown'} only
-                                </p>
-                            </div>
-                        </div>
-                        <div className="modal-footer">
-                            <button 
-                                className="btn btn-ghost" 
-                                onClick={() => setShowSaveModal(false)}
-                                disabled={saving}
-                            >
-                                Cancel
-                            </button>
-                            <button 
-                                id={isEditing ? 'save-changes-btn' : 'save-outfit-btn'}
-                                className="btn btn-primary" 
-                                onClick={isEditing ? handleEditOutfit : handleSaveOutfit}
-                                disabled={saving || !saveForm.name.trim()}
-                            >
-                                {saving ? '⏳ Saving...' : (isEditing ? 'Save Changes' : 'Save Outfit')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <style>{`
-        .outfit-grid { display: grid; grid-template-columns: 260px 1fr; gap: var(--sp-8); align-items: start; }
-        .outfit-item { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); border: 1.5px solid var(--clr-border); border-radius: var(--r-lg); cursor: pointer; transition: all var(--tr-fast); }
-        .outfit-item:hover, .outfit-item.active { border-color: var(--clr-primary); background: rgba(192,132,252,0.06); }
-        .outfit-canvas { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); }
-        .outfit-slot { display: flex; flex-direction: column; }
-        .outfit-slot-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--clr-text-3); margin-bottom: var(--sp-2); }
-        .outfit-slot-piece { position: relative; border-radius: var(--r-lg); overflow: hidden; aspect-ratio: 3/4; border: 1px solid var(--clr-border); }
-        .outfit-slot-piece img { width: 100%; height: 100%; object-fit: cover; }
-        .outfit-slot-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity var(--tr-fast); }
-        .outfit-slot-piece:hover .outfit-slot-overlay { opacity: 1; }
-        .outfit-slot-name { font-size: 11px; font-weight: 500; margin-top: 6px; color: var(--clr-text-2); text-align: center; }
-        .outfit-slot-empty { width: 100%; aspect-ratio: 3/4; border: 2px dashed var(--clr-border-2); border-radius: var(--r-lg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--clr-text-3); font-size: 12px; font-weight: 500; transition: all var(--tr-fast); background: transparent; cursor: pointer; }
-        .outfit-slot-empty:hover { border-color: var(--clr-primary); color: var(--clr-primary); background: rgba(192,132,252,0.05); }
-        .product-picker-item { text-align: left; border: 1.5px solid var(--clr-border); border-radius: var(--r-lg); overflow: hidden; padding: 0 0 var(--sp-3); transition: all var(--tr-fast); background: transparent; cursor: pointer; }
-        .product-picker-item:not([disabled]):hover { border-color: var(--clr-primary); transform: translateY(-2px); }
-        .product-picker-item img { width: 100%; aspect-ratio: 3/4; object-fit: cover; }
-        .product-picker-item > div { padding: 0 var(--sp-3); margin-top: var(--sp-2); }
-        .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
-        .badge-info { background: rgba(59,130,246,0.1); color: var(--clr-primary); }
-        .badge-success { background: rgba(34,197,94,0.1); color: rgb(34,197,94); }
-        .badge-muted { background: rgba(156,163,175,0.1); color: var(--clr-text-3); }
-        @media (max-width: 900px) { .outfit-grid { grid-template-columns: 1fr; } .outfit-canvas { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 480px) { .outfit-canvas { grid-template-columns: 1fr; } }
-      `}</style>
         </div>
     );
 }

@@ -49,9 +49,21 @@ export default function CartPage() {
                                         <tr key={item.variantId}>
                                             <td>
                                                 <div className="flex items-center gap-3">
-                                                    <img src={item.image} alt={item.productName} style={{ width: 60, height: 72, objectFit: 'cover', borderRadius: 'var(--r-md)' }} />
+                                                    <Link to={`/products/${item.productId}`} className="flex-shrink-0">
+                                                        <img 
+                                                            src={item.image} 
+                                                            alt={item.productName} 
+                                                            style={{ width: 60, height: 72, objectFit: 'cover', borderRadius: 'var(--r-md)' }}
+                                                            className="transition-opacity duration-300 hover:opacity-70 cursor-pointer"
+                                                        />
+                                                    </Link>
                                                     <div>
-                                                        <Link to={`/products/${item.productId}`} className="font-semibold text-sm hover-primary">{item.productName}</Link>
+                                                        <Link 
+                                                            to={`/products/${item.productId}`} 
+                                                            className="font-semibold text-sm transition-all duration-300 hover:underline hover:text-purple-600 cursor-pointer block"
+                                                        >
+                                                            {item.productName}
+                                                        </Link>
                                                     </div>
                                                 </div>
                                             </td>

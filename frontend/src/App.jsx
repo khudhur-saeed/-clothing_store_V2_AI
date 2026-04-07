@@ -24,6 +24,7 @@ import OrdersPage from './pages/customer/OrdersPage';
 import OrderDetailPage from './pages/customer/OrderDetailPage';
 import FavoritesPage from './pages/customer/FavoritesPage';
 import OutfitGalleryPage from './pages/customer/OutfitGalleryPage';
+import OutfitBuilderPage from './pages/customer/OutfitBuilderPage';
 import ProfilePage from './pages/customer/ProfilePage';
 import InvoicePage from './pages/customer/InvoicePage';
 import ChatbotPage from './pages/customer/ChatbotPage';
@@ -85,7 +86,7 @@ export default function App() {
                                     <Route path="/orders/:id/invoice" element={<InvoicePage />} />
                                     <Route path="/favorites" element={<FavoritesPage />} />
                                     <Route path="/outfits" element={<OutfitGalleryPage />} />
-                                    <Route path="/outfits/builder" element={<Navigate to="/outfits?section=create" replace />} />
+                                    <Route path="/outfits/builder" element={<OutfitBuilderPage />} />
                                     <Route path="/outfit-gallery" element={<Navigate to="/outfits?section=community" replace />} />
                                     <Route path="/profile" element={<ProfilePage />} />
                                     <Route path="/chat" element={<ChatbotPage />} />

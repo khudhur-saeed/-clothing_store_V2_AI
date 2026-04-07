@@ -4,6 +4,7 @@ from app.dependencies import get_db, get_current_user
 from app.models.cart import ShoppingCart
 from app.models.product_variant import ProductVariant
 from app.models.product import Product
+from app.schemas.cart import CartItemCreate
 
 router = APIRouter(prefix="/api/cart", tags=["Cart"])
 
@@ -34,11 +35,13 @@ def get_cart(current_user=Depends(get_current_user), db: Session = Depends(get_d
 
 @router.post("/")
 def add_to_cart(
-    variant_id: int,
-    quantity: int = 1,
+    payload: CartItemCreate,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    variant_id = payload.variant_id
+    quantity = payload.quantity
+    
     # Check variant exists
     variant = db.query(ProductVariant).filter(ProductVariant.variant_id == variant_id).first()
     if not variant:
@@ -68,7 +71,7 @@ def add_to_cart(
 @router.put("/{variant_id}")
 def update_cart_item(
     variant_id: int,
-    quantity: int,
+    payload: CartItemCreate,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -78,7 +81,7 @@ def update_cart_item(
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not in cart")
-    item.quantity = quantity
+    item.quantity = payload.quantity
     db.commit()
     return {"message": "Updated"}
 

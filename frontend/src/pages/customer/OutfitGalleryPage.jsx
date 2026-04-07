@@ -97,6 +97,12 @@ export default function OutfitGalleryPage() {
     const [draggedItemId, setDraggedItemId] = useState(null);
 
     useEffect(() => {
+        if (sectionFromUrl === 'create') {
+            navigate('/outfits/builder', { replace: true });
+        }
+    }, [navigate, sectionFromUrl]);
+
+    useEffect(() => {
         if (!VALID_SECTIONS.has(sectionFromUrl || '')) {
             setSearchParams({ section: activeTab }, { replace: true });
             return;

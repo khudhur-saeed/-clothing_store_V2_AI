@@ -3,7 +3,6 @@ from typing import Optional
 from datetime import datetime
 
 class CartItemBase(BaseModel):
-    user_id: int
     variant_id: int
     quantity: int = 1
 
@@ -13,7 +12,10 @@ class CartItemCreate(CartItemBase):
 class CartItemUpdate(BaseModel):
     quantity: int
 
-class CartItemOut(CartItemBase):
+class CartItemOut(BaseModel):
+    user_id: int
+    variant_id: int
+    quantity: int
     added_at: Optional[datetime] = None
 
     class Config:

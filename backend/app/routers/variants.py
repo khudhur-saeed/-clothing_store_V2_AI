@@ -69,6 +69,34 @@ def update_variant(
     return variant
 
 
+@router.put("/{product_id}/variants/{variant_id}")
+def update_variant_for_product(
+    product_id: int,
+    variant_id: int,
+    body: VariantUpdate,
+    db: Session = Depends(get_db),
+    admin=Depends(get_admin_user)
+):
+    variant = db.query(ProductVariant).filter(ProductVariant.variant_id == variant_id).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    if variant.product_id != product_id:
+        raise HTTPException(status_code=404, detail="Variant not found for this product")
+
+    if body.color is not None:
+        variant.color = body.color
+    if body.size is not None:
+        variant.size = body.size
+    if body.stock is not None:
+        variant.stock = body.stock
+    if body.images is not None:
+        variant.images = body.images
+
+    db.commit()
+    db.refresh(variant)
+    return variant
+
+
 @router.delete("/variants/{variant_id}")
 def delete_variant(
     variant_id: int,
@@ -78,6 +106,24 @@ def delete_variant(
     variant = db.query(ProductVariant).filter(ProductVariant.variant_id == variant_id).first()
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
+    db.delete(variant)
+    db.commit()
+    return {"message": "Variant deleted"}
+
+
+@router.delete("/{product_id}/variants/{variant_id}")
+def delete_variant_for_product(
+    product_id: int,
+    variant_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_admin_user)
+):
+    variant = db.query(ProductVariant).filter(ProductVariant.variant_id == variant_id).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Variant not found")
+    if variant.product_id != product_id:
+        raise HTTPException(status_code=404, detail="Variant not found for this product")
+
     db.delete(variant)
     db.commit()
     return {"message": "Variant deleted"}

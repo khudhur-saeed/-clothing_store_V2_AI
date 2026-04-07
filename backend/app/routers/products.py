@@ -2,9 +2,10 @@ from fastapi import HTTPException, APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from app.dependencies import get_db, get_admin_user
 from app.models.product import Product, DepartmentEnum, OutfitSlotEnum
+from app.models.category import Category
 from app.models.product_variant import ProductVariant
 from app.models.order import Order, OrderItem
 from app.models.cart import ShoppingCart
@@ -41,32 +42,41 @@ def get_department_filter_values(value: str) -> List[DepartmentEnum]:
         raise HTTPException(status_code=400, detail=f"Invalid department: {value}")
 
 
-def parse_clothing_type(value: str) -> OutfitSlotEnum:
-    try:
-        return OutfitSlotEnum[value]
-    except KeyError:
-        valid = [s.name for s in OutfitSlotEnum]
-        raise HTTPException(status_code=400, detail=f"Invalid clothing type. Must be one of: {valid}")
+def parse_piece_type(value: str) -> OutfitSlotEnum:
+    normalized = (value or "").strip()
+    for slot in OutfitSlotEnum:
+        if slot.name.lower() == normalized.lower() or slot.value.lower() == normalized.lower():
+            return slot
+    valid = [s.value for s in OutfitSlotEnum]
+    raise HTTPException(status_code=400, detail=f"Invalid piece type. Must be one of: {valid}")
 
 
-def infer_department_from_category(category: Optional[str]) -> DepartmentEnum:
+def get_category_or_400(db: Session, category_id: int) -> Category:
+    category = db.query(Category).filter(Category.id == category_id).first()
     if not category:
-        return DepartmentEnum.Unisex
+        raise HTTPException(status_code=400, detail=f"Category {category_id} not found")
+    return category
 
-    normalized = category.strip().lower()
-    mapping = {
-        "men": DepartmentEnum.Men,
-        "male": DepartmentEnum.Men,
-        "women": DepartmentEnum.Women,
-        "woman": DepartmentEnum.Women,
-        "ladies": DepartmentEnum.Women,
-        "boys": DepartmentEnum.Boys,
-        "girls": DepartmentEnum.Girls,
-        "kids": DepartmentEnum.Unisex,
-        "kid": DepartmentEnum.Unisex,
-        "unisex": DepartmentEnum.Unisex,
+
+def serialize_product(product: Product) -> Dict[str, Any]:
+    piece_type = product.piece_type.value if isinstance(product.piece_type, OutfitSlotEnum) else str(product.piece_type)
+    department = product.department.value if isinstance(product.department, DepartmentEnum) else product.department
+    category_name = product.category_rel.name if getattr(product, "category_rel", None) else product.category
+
+    return {
+        "product_id": product.product_id,
+        "name": product.name,
+        "description": product.description,
+        "price": product.price,
+        "status": product.status,
+        "category_id": product.category_id,
+        "category": category_name,
+        "piece_type": piece_type,
+        # Backward-compatible alias for existing consumers.
+        "outfit_slot": piece_type,
+        "department": department,
+        "target_group": product.target_group,
     }
-    return mapping.get(normalized, DepartmentEnum.Unisex)
 
 
 @router.get("/admin/all")
@@ -75,15 +85,17 @@ def get_all_products_admin(
     admin=Depends(get_admin_user)
 ):
     """Get all products (including inactive) - ADMIN ONLY"""
-    return db.query(Product).all()
+    return [serialize_product(p) for p in db.query(Product).all()]
 
 
 @router.get("/")
 def get_products(
     search: Optional[str] = Query(None),
+    category_id: Optional[int] = Query(None),
     category: Optional[str] = Query(None),
     target_group: Optional[str] = Query(None),
     department: Optional[str] = Query(None),
+    piece_type: Optional[str] = Query(None),
     clothing_type: Optional[str] = Query(None),
     outfit_slot: Optional[str] = Query(None),
     min_price: Optional[float] = Query(None),
@@ -97,8 +109,10 @@ def get_products(
     
     if search:
         q = q.filter(Product.name.ilike(f"%{search}%"))
+    if category_id is not None:
+        q = q.filter(Product.category_id == category_id)
     # Support legacy category parameter
-    if category:
+    elif category:
         q = q.filter(Product.category == category)
     # Support legacy target_group parameter
     if target_group:
@@ -111,19 +125,16 @@ def get_products(
         else:
             q = q.filter(Product.department.in_(dept_values))
     # New tier 2: Outfit Slot
-    slot_filter = clothing_type or outfit_slot
+    slot_filter = piece_type or clothing_type or outfit_slot
     if slot_filter:
-        try:
-            q = q.filter(Product.outfit_slot == OutfitSlotEnum[slot_filter])
-        except KeyError:
-            raise HTTPException(status_code=400, detail=f"Invalid clothing type: {slot_filter}")
+        q = q.filter(Product.piece_type == parse_piece_type(slot_filter))
     
     if min_price is not None:
         q = q.filter(Product.price >= min_price)
     if max_price is not None:
         q = q.filter(Product.price <= max_price)
     
-    return q.all()
+    return [serialize_product(p) for p in q.all()]
 
 
 @router.get("/{product_id}")
@@ -134,7 +145,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
     # Only show active products to customers
     if product.status != 'active':
         raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    return serialize_product(product)
 
 
 @router.post("/")
@@ -143,25 +154,23 @@ def create_product(
     db: Session = Depends(get_db),
     admin=Depends(get_admin_user)
 ):
-    dept_enum = parse_department(payload.department) if payload.department else infer_department_from_category(payload.category)
-    slot_value = payload.clothing_type or payload.outfit_slot
-    if not slot_value:
-        raise HTTPException(status_code=400, detail="Clothing type is required")
-    slot_enum = parse_clothing_type(slot_value)
+    category = get_category_or_400(db, payload.category_id)
+    slot_enum = parse_piece_type(payload.piece_type)
     
     product = Product(
         name=payload.name,
         price=payload.price,
         description=payload.description,
-        category=payload.category,
+        category=category.name,
+        category_id=category.id,
         status=payload.status,
-        department=dept_enum,
-        outfit_slot=slot_enum
+        department=DepartmentEnum.Unisex,
+        piece_type=slot_enum
     )
     db.add(product)
     db.commit()
     db.refresh(product)
-    return product
+    return serialize_product(product)
 
 
 @router.put("/{product_id}")
@@ -197,19 +206,18 @@ def update_product(
         product.price = payload.price
     if payload.description is not None:
         product.description = payload.description
-    if payload.category is not None:
-        product.category = payload.category
-    if payload.department:
-        product.department = parse_department(payload.department)
-    slot_value = payload.clothing_type or payload.outfit_slot
-    if slot_value:
-        product.outfit_slot = parse_clothing_type(slot_value)
+    if payload.category_id is not None:
+        category = get_category_or_400(db, payload.category_id)
+        product.category_id = category.id
+        product.category = category.name
+    if payload.piece_type is not None:
+        product.piece_type = parse_piece_type(payload.piece_type)
     if payload.status is not None:
         product.status = payload.status
     
     db.commit()
     db.refresh(product)
-    return product
+    return serialize_product(product)
 
 
 @router.delete("/{product_id}")

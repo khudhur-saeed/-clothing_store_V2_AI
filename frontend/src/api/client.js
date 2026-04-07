@@ -56,6 +56,7 @@ export const apiCall = async (path, options = {}, params = {}) => {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Request failed' }));
+        console.error(`❌ API Error [${res.status}]:`, err);
         throw new Error(err.detail || 'Request failed');
     }
 

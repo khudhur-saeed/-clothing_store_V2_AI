@@ -25,13 +25,14 @@ class OutfitCreate(BaseModel):
     name: str
     description: Optional[str] = None
     visibility: str = 'private'
-    department: str
+    category_id: Optional[int] = None
     product_ids: List[int] = []
 
 class OutfitUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     visibility: Optional[str] = None
+    category_id: Optional[int] = None
     product_ids: Optional[List[int]] = None
 
 class OutfitOut(OutfitBase):

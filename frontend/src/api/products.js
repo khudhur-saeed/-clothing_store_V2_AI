@@ -21,6 +21,7 @@ function getImagesArray(images) {
 }
 
 function normalizeProduct(product, variants = []) {
+    const pieceType = product.piece_type || product.outfit_slot || '';
 
     // Build images array from all variants' images (now stored as JSON arrays)
     const allImages = [];
@@ -55,8 +56,9 @@ function normalizeProduct(product, variants = []) {
         description: product.description || '',
         price: Number(product.price) || 0,
         category: product.category || 'Uncategorized',
-        category_id: product.category,   // use string category as fallback
-        piece_type: product.category || '',
+        category_id: product.category_id ?? null,
+        piece_type: pieceType,
+        outfit_slot: pieceType,
         status: product.status,
         rating: 0,                       // computed from reviews
         images: allImages.length ? allImages : [{ url: 'https://placehold.co/400x500?text=No+Image' }],
