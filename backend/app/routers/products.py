@@ -1,3 +1,4 @@
+from app.core.search import search_products, index_product, delete_product as es_delete_product
 from fastapi import HTTPException, APIRouter, Depends, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -108,7 +109,14 @@ def get_products(
     q = q.filter(Product.status == 'active')
     
     if search:
-        q = q.filter(Product.name.ilike(f"%{search}%"))
+        # --- NEW: ELASTICSEARCH ---
+        matched_ids = search_products(search)
+        if not matched_ids:
+            return []  # Elasticsearch found nothing!
+        
+        # Tell PostgreSQL to only return the products Elasticsearch found
+        q = q.filter(Product.product_id.in_(matched_ids))
+        # --------------------------
     if category_id is not None:
         q = q.filter(Product.category_id == category_id)
     # Support legacy category parameter
@@ -170,6 +178,7 @@ def create_product(
     db.add(product)
     db.commit()
     db.refresh(product)
+    index_product(product)  # Sync to Elasticsearch!
     return serialize_product(product)
 
 
@@ -217,6 +226,7 @@ def update_product(
     
     db.commit()
     db.refresh(product)
+    index_product(product)  # Sync the updates to Elasticsearch!
     return serialize_product(product)
 
 
@@ -277,5 +287,5 @@ def delete_product(
             status_code=409,
             detail="Cannot delete this product because it is referenced by other records. Set it to inactive instead."
         )
-
+    es_delete_product(product_id)  # Remove from Elasticsearch!
     return {"message": "Product deleted"}
