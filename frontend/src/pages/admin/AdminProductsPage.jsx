@@ -115,7 +115,7 @@ export default function AdminProductsPage() {
     const [editId, setEditId] = useState(null);
     const [saving, setSaving] = useState(false);
 
-    const [form, setForm] = useState({ name: '', description: '', categoryId: '', pieceType: 'Tops', price: '', status: 'inactive' });
+    const [form, setForm] = useState({ name: '', description: '', categoryId: '', pieceType: 'Tops', department: 'Unisex', price: '', status: 'inactive' });
     const [formErrors, setFormErrors] = useState({});
     const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -170,7 +170,7 @@ export default function AdminProductsPage() {
         setEditId(null);
         setForm({
             name: '', description: '', categoryId: categoryOptions[0] ? String(categoryOptions[0].id) : '',
-            pieceType: 'Tops', price: '', status: 'inactive'
+            pieceType: 'Tops', department: 'Unisex', price: '', status: 'inactive'
         });
         setFormErrors({});
         setVariants([emptyVariant()]);
@@ -187,6 +187,7 @@ export default function AdminProductsPage() {
             name: p.name, description: p.description || '',
             categoryId: String(p.category_id ?? fallbackCategory?.id ?? ''),
             pieceType: normalizePieceType(p.piece_type || p.outfit_slot) || 'Tops',
+            department: p.department || 'Unisex',
             price: String(p.price), status: normalizeProductStatus(p.status)
         });
         try {
@@ -282,12 +283,14 @@ export default function AdminProductsPage() {
                 await apiCall(`/products/${editId}`, { method: 'PUT' }, {
                     name: form.name.trim(), description: form.description,
                     category_id: Number(form.categoryId), piece_type: form.pieceType,
+                    department: form.department,
                     price: Number(form.price), status: form.status,
                 });
             } else {
                 const res = await apiCall('/products/', { method: 'POST' }, {
                     name: form.name.trim(), description: form.description,
                     category_id: Number(form.categoryId), piece_type: form.pieceType,
+                    department: form.department,
                     price: Number(form.price), status: 'inactive',
                 });
                 productId = res.product_id;
@@ -444,7 +447,7 @@ export default function AdminProductsPage() {
                                         <textarea className="form-textarea" value={form.description} onChange={set('description')} placeholder="Describe the product…" style={{ minHeight: 72, resize: 'vertical' }} />
                                     </div>
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
                                         <div className="form-group" style={{ margin: 0 }}>
                                             <label className="form-label">Category *</label>
                                             <select className="form-select" value={form.categoryId} onChange={set('categoryId')} style={{ borderColor: formErrors.categoryId ? 'var(--clr-error)' : undefined }}>
@@ -452,6 +455,12 @@ export default function AdminProductsPage() {
                                                 {categoryOptions.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
                                             </select>
                                             {formErrors.categoryId && <p className="text-xs" style={{ color: 'var(--clr-error)', marginTop: 4 }}>{formErrors.categoryId}</p>}
+                                        </div>
+                                        <div className="form-group" style={{ margin: 0 }}>
+                                            <label className="form-label">Department *</label>
+                                            <select className="form-select" value={form.department} onChange={set('department')}>
+                                                {['Men', 'Women', 'Boys', 'Girls', 'Unisex'].map(d => <option key={d} value={d}>{d}</option>)}
+                                            </select>
                                         </div>
                                         <div className="form-group" style={{ margin: 0 }}>
                                             <label className="form-label">Piece Type *</label>
@@ -503,7 +512,7 @@ export default function AdminProductsPage() {
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                     {variants.map((v, idx) => (
-                                        <VariantCard key={idx} v={v} vIdx={idx} canRemove={variants.length > 1} onUpdate={(key, val) => setVField(idx, key, val)} onAddImage={() => addImageToVariant(idx)} onRemoveImage={(imgIdx) => removeImage(idx, imgIdx)} onRemove={() => removeVariantRow(idx)} onAddSizeOption={() => addSizeOptionToVariant(idx)} onRemoveSizeOption={(soIdx) => removeSizeOptionFromVariant(idx, soIdx)} onUpdateSizeOption={(soIdx, key, val) => setSizeOptionField(idx, soIdx, key, val)} />
+                                        <VariantCard key={idx} pieceType={form.pieceType} v={v} vIdx={idx} canRemove={variants.length > 1} onUpdate={(key, val) => setVField(idx, key, val)} onAddImage={() => addImageToVariant(idx)} onRemoveImage={(imgIdx) => removeImage(idx, imgIdx)} onRemove={() => removeVariantRow(idx)} onAddSizeOption={() => addSizeOptionToVariant(idx)} onRemoveSizeOption={(soIdx) => removeSizeOptionFromVariant(idx, soIdx)} onUpdateSizeOption={(soIdx, key, val) => setSizeOptionField(idx, soIdx, key, val)} />
                                     ))}
                                 </div>
 
@@ -528,10 +537,14 @@ export default function AdminProductsPage() {
     );
 }
 
-function VariantCard({ v, vIdx, canRemove, onUpdate, onAddImage, onRemoveImage, onRemove, onAddSizeOption, onRemoveSizeOption, onUpdateSizeOption }) {
+function VariantCard({ pieceType, v, vIdx, canRemove, onUpdate, onAddImage, onRemoveImage, onRemove, onAddSizeOption, onRemoveSizeOption, onUpdateSizeOption }) {
     const [collapsed, setCollapsed] = useState(false);
     const isCustomColor = v.color && !PRESET_COLORS.some(c => c.hex === v.color);
     const hasErrors = Object.keys(v.errors || {}).length > 0;
+
+    const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+    const SHOE_SIZES = Array.from({ length: 15 }, (_, i) => String(35 + i)); // 35 to 49
+    const sizeOptionsList = pieceType === 'Shoes' ? SHOE_SIZES : CLOTHING_SIZES;
 
     return (
         <div style={{ border: hasErrors ? '1.5px solid var(--clr-error)' : '1px solid var(--clr-border)', borderRadius: 'var(--r-lg)', overflow: 'hidden', background: 'var(--clr-surface)' }}>
@@ -605,7 +618,7 @@ function VariantCard({ v, vIdx, canRemove, onUpdate, onAddImage, onRemoveImage, 
                                                 <tr key={soIdx} style={{ borderBottom: soIdx < v.sizeOptions.length - 1 ? '1px solid var(--clr-border)' : 'none' }}>
                                                     <td style={{ padding: '8px 12px' }}>
                                                         <select className="form-select" value={so.size} onChange={e => onUpdateSizeOption(soIdx, 'size', e.target.value)} style={{ borderColor: so.sizeErrors?.size ? 'var(--clr-error)' : undefined }}>
-                                                            {['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'].map(s => <option key={s}>{s}</option>)}
+                                                            {sizeOptionsList.map(s => <option key={s}>{s}</option>)}
                                                         </select>
                                                         {so.sizeErrors?.size && <p className="text-xs" style={{ color: 'var(--clr-error)', marginTop: 2 }}>{so.sizeErrors.size}</p>}
                                                     </td>

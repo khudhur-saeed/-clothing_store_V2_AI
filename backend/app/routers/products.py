@@ -38,7 +38,11 @@ def get_department_filter_values(value: str) -> List[DepartmentEnum]:
         return [DepartmentEnum.Boys, DepartmentEnum.Girls, DepartmentEnum.Unisex]
 
     try:
-        return [DepartmentEnum[value]]
+        dept = DepartmentEnum[value]
+        # Always include Unisex products — they fit any department.
+        if dept == DepartmentEnum.Unisex:
+            return [DepartmentEnum.Unisex]
+        return [dept, DepartmentEnum.Unisex]
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Invalid department: {value}")
 
@@ -109,13 +113,21 @@ def get_products(
     q = q.filter(Product.status == 'active')
     
     if search:
-        # --- NEW: ELASTICSEARCH ---
-        matched_ids = search_products(search)
-        if not matched_ids:
-            return []  # Elasticsearch found nothing!
-        
-        # Tell PostgreSQL to only return the products Elasticsearch found
-        q = q.filter(Product.product_id.in_(matched_ids))
+        # --- ELASTICSEARCH with DB fallback ---
+        matched_ids = search_products(search)  # Returns None if ES is down
+        if matched_ids is None:
+            # ES unavailable: fall back to PostgreSQL ILIKE search
+            q = q.filter(
+                or_(
+                    Product.name.ilike(f"%{search}%"),
+                    Product.description.ilike(f"%{search}%"),
+                )
+            )
+        elif len(matched_ids) == 0:
+            return []  # Elasticsearch found nothing
+        else:
+            # Tell PostgreSQL to only return the products Elasticsearch found
+            q = q.filter(Product.product_id.in_(matched_ids))
         # --------------------------
     if category_id is not None:
         q = q.filter(Product.category_id == category_id)
@@ -172,7 +184,7 @@ def create_product(
         category=category.name,
         category_id=category.id,
         status=payload.status,
-        department=DepartmentEnum.Unisex,
+        department=DepartmentEnum[payload.department],
         piece_type=slot_enum
     )
     db.add(product)
@@ -221,6 +233,8 @@ def update_product(
         product.category = category.name
     if payload.piece_type is not None:
         product.piece_type = parse_piece_type(payload.piece_type)
+    if payload.department is not None:
+        product.department = DepartmentEnum[payload.department]
     if payload.status is not None:
         product.status = payload.status
     

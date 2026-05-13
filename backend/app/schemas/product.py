@@ -40,6 +40,7 @@ class AdminProductCreate(BaseModel):
     status: ProductStatus = "inactive"
     category_id: int
     piece_type: ProductPieceType
+    department: str
 
 
 class AdminProductUpdate(BaseModel):
@@ -49,3 +50,4 @@ class AdminProductUpdate(BaseModel):
     status: Optional[ProductStatus] = None
     category_id: Optional[int] = None
     piece_type: Optional[ProductPieceType] = None
+    department: Optional[str] = None

@@ -7,7 +7,7 @@ from app.models.cart import ShoppingCart
 from app.models.product_variant import ProductVariant
 from app.models.product import Product
 from app.models.coupon import Coupon
-from app.schemas.order import OrderStatusUpdate
+from app.schemas.order import OrderStatusUpdate, PlaceOrderRequest
 
 router = APIRouter(prefix="/api/orders", tags=["Orders"])
 
@@ -15,12 +15,13 @@ router = APIRouter(prefix="/api/orders", tags=["Orders"])
 # ── Place order ───────────────────────────────────────────────────────────
 @router.post("/")
 def place_order(
-    address_id: int = None,
-    payment: str = "card",
-    coupon_code: str = None,
+    payload: PlaceOrderRequest,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    address_id = payload.address_id
+    payment = payload.payment
+    coupon_code = payload.coupon_code
     cart_items = db.query(ShoppingCart).filter(ShoppingCart.user_id == current_user.user_id).all()
     if not cart_items:
         raise HTTPException(status_code=400, detail="Cart is empty")

@@ -46,3 +46,8 @@ class OrderOut(OrderBase):
 
 class OrderStatusUpdate(BaseModel):
     status: Literal["processing", "shipped", "out_for_delivery", "delivered", "cancelled"]
+
+class PlaceOrderRequest(BaseModel):
+    address_id: Optional[int] = None
+    payment: str = "card"
+    coupon_code: Optional[str] = None

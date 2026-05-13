@@ -6,6 +6,12 @@ import { useAuth } from '../../context/AuthContext';
 import { apiCall } from '../../api/client';
 
 const PIECE_TYPES = ['Tops', 'Bottoms', 'Outerwear', 'Shoes', 'Accessories'];
+const VALID_DEPARTMENTS = ['Men', 'Women', 'Boys', 'Girls', 'Unisex'];
+
+const sanitizeDepartment = (value) => {
+    const str = String(value || '').trim();
+    return VALID_DEPARTMENTS.includes(str) ? str : VALID_DEPARTMENTS[0]; // default to 'Men'
+};
 
 const normalizePieceType = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
@@ -102,15 +108,15 @@ export default function OutfitBuilderPage() {
 
         const loadData = async () => {
             try {
-                const [categoryRows, products] = await Promise.all([
-                    apiCall('/categories/').catch(() => []),
-                    apiCall('/products/'),
-                ]);
+                const products = await apiCall('/products/').catch(() => []);
 
-                const safeCategories = (categoryRows || [])
-                    .filter((row) => row && row.id != null && row.name)
-                    .map((row) => ({ id: Number(row.id), name: String(row.name).trim() }))
-                    .filter((row) => row.name.length > 0);
+                const safeCategories = [
+                    { id: 'Men', name: 'Men' },
+                    { id: 'Women', name: 'Women' },
+                    { id: 'Boys', name: 'Boys' },
+                    { id: 'Girls', name: 'Girls' },
+                    { id: 'Unisex', name: 'Unisex' }
+                ];
 
                 const safeProducts = Array.isArray(products) ? products : [];
 
@@ -155,17 +161,17 @@ export default function OutfitBuilderPage() {
 
         const remembered = outfitCategoryMap[currentOutfit.outfit_id];
         if (remembered) {
-            setCurrentCategoryId(String(remembered));
+            setCurrentCategoryId(sanitizeDepartment(remembered));
             setActiveSlot('Tops');
             setFilteredProducts([]);
             return;
         }
 
-        const explicit = currentOutfit.target_category_id || currentOutfit.targetCategoryId || null;
+        const explicit = currentOutfit.department || currentOutfit.target_category_id || currentOutfit.targetCategoryId || null;
         if (explicit) {
-            const explicitId = String(explicit);
-            setCurrentCategoryId(explicitId);
-            setOutfitCategoryMap((prev) => ({ ...prev, [currentOutfit.outfit_id]: explicitId }));
+            const explicitDept = sanitizeDepartment(explicit);
+            setCurrentCategoryId(explicitDept);
+            setOutfitCategoryMap((prev) => ({ ...prev, [currentOutfit.outfit_id]: explicitDept }));
             setActiveSlot('Tops');
             setFilteredProducts([]);
             return;
@@ -173,9 +179,9 @@ export default function OutfitBuilderPage() {
 
         const firstProductId = (currentOutfit.products || [])[0];
         const firstProduct = firstProductId ? productMap.get(firstProductId) : null;
-        const inferredCategoryId = firstProduct?.category_id ? String(firstProduct.category_id) : '';
-        const fallbackCategoryId = categories[0] ? String(categories[0].id) : '';
-        const nextCategoryId = inferredCategoryId || fallbackCategoryId;
+        const inferredCategoryId = firstProduct?.department ? String(firstProduct.department) : '';
+        const fallbackCategoryId = VALID_DEPARTMENTS[0];
+        const nextCategoryId = sanitizeDepartment(inferredCategoryId || fallbackCategoryId);
 
         setCurrentCategoryId(nextCategoryId);
         if (nextCategoryId) {
@@ -197,12 +203,12 @@ export default function OutfitBuilderPage() {
         const fetchFilteredProducts = async () => {
             setLoadingPicker(true);
             try {
-                const categoryIdNum = Number(currentCategoryId);
+                const departmentStr = sanitizeDepartment(currentCategoryId);
                 const pieceTypeStr = String(activeSlot).trim();
 
                 // Build query parameters - ensure proper types
                 const params = {
-                    category_id: categoryIdNum,
+                    department: departmentStr,
                     piece_type: pieceTypeStr,
                 };
 
@@ -210,7 +216,7 @@ export default function OutfitBuilderPage() {
                 const queryString = new URLSearchParams(params).toString();
                 const fullUrl = `http://localhost:8000/api/products/?${queryString}`;
                 console.log('🔍 Fetching products with URL:', fullUrl);
-                console.log('📋 Parameters:', { categoryIdNum, pieceTypeStr });
+                console.log('📋 Parameters:', { departmentStr, pieceTypeStr });
 
                 const products = await apiCall('/products/', {}, params);
 
@@ -241,10 +247,11 @@ export default function OutfitBuilderPage() {
     const handleCategoryChange = (nextCategoryId) => {
         if (!currentOutfit) return;
 
-        setCurrentCategoryId(nextCategoryId);
+        const dept = sanitizeDepartment(nextCategoryId);
+        setCurrentCategoryId(dept);
         setOutfitCategoryMap((prev) => ({
             ...prev,
-            [currentOutfit.outfit_id]: nextCategoryId,
+            [currentOutfit.outfit_id]: dept,
         }));
         setActiveSlot('Tops');
         setFilteredProducts([]);
@@ -292,8 +299,7 @@ export default function OutfitBuilderPage() {
             name: createForm.name.trim(),
             description: createForm.description,
             visibility: createForm.visibility,
-            target_category_id: Number(categoryId),
-            targetCategoryId: Number(categoryId),
+            department: categoryId,
         });
 
         if (createdOutfit?.outfit_id) {
@@ -332,7 +338,7 @@ export default function OutfitBuilderPage() {
                 name: currentOutfit.name,
                 description: currentOutfit.description || '',
                 visibility: currentOutfit.visibility || 'private',
-                category_id: currentCategoryId ? Number(currentCategoryId) : null,
+                category_id: null,
                 product_ids: productIds,
             };
 
@@ -599,7 +605,7 @@ export default function OutfitBuilderPage() {
 
                                 <div style={{ display: 'grid', gap: 'var(--sp-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
                                     <div>
-                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Category</label>
+                                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Department</label>
                                         <select
                                             value={currentCategoryId}
                                             onChange={(event) => handleCategoryChange(event.target.value)}
@@ -616,7 +622,7 @@ export default function OutfitBuilderPage() {
                                                 transition: 'all var(--tr-fast)',
                                             }}
                                         >
-                                            <option value="">Select category</option>
+                                            <option value="">Select department</option>
                                             {categories.map((category) => (
                                                 <option key={category.id} value={category.id}>{category.name}</option>
                                             ))}
@@ -780,7 +786,7 @@ export default function OutfitBuilderPage() {
                             </div>
 
                             <div>
-                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Category</label>
+                                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>Department</label>
                                 <select
                                     value={createForm.categoryId}
                                     onChange={(event) => setCreateForm((prev) => ({ ...prev, categoryId: event.target.value }))}

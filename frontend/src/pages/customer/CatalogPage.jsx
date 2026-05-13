@@ -24,7 +24,8 @@ const pieceQueryMap = {
     accessories: 'Accessories',
 };
 
-const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
+const SHOE_SIZES = Array.from({ length: 15 }, (_, i) => String(35 + i));
 
 function FilterSection({ title, open, toggle, children }) {
     return (
@@ -186,7 +187,7 @@ export default function CatalogPage() {
 
             <FilterSection title="Size" open={openSections.size} toggle={() => toggle('size')}>
                 <div className="size-btns">
-                    {sizes.map(s => (
+                    {(activePiece === 'Shoes' ? SHOE_SIZES : CLOTHING_SIZES).map(s => (
                         <button key={s} className={`size-btn${activeSize === s ? ' active' : ''}`} onClick={() => setParam('size', activeSize === s ? null : s)}>{s}</button>
                     ))}
                 </div>
