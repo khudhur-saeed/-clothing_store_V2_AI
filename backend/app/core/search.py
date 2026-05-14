@@ -5,10 +5,10 @@ logger = logging.getLogger(__name__)
 
 # Create a single connection we can reuse across the whole app
 es = Elasticsearch(
-    "http://localhost:9200",
-    request_timeout=5,   # Don't hang the API for more than 5 seconds
-    max_retries=1,
-    retry_on_timeout=False,
+    "http://127.0.0.1:9200",
+    request_timeout=20,
+    max_retries=3,
+    retry_on_timeout=True,
 )
 INDEX_NAME = "products"
 
@@ -30,9 +30,13 @@ def create_index():
         return
 
     # 1. Delete the old index if we are starting fresh (good for development)
-    if es.indices.exists(index=INDEX_NAME):
-        es.indices.delete(index=INDEX_NAME)
-        print(f"Deleted old {INDEX_NAME} index.")
+    try:
+        if es.indices.exists(index=INDEX_NAME):
+            es.indices.delete(index=INDEX_NAME)
+            print(f"Deleted old {INDEX_NAME} index.")
+    except (ConnectionError, ConnectionTimeout, TransportError, Exception) as exc:
+        logger.warning("Elasticsearch unavailable while deleting index: %s", exc)
+        return
 
     # 2. Define the exact structure of our documents
     mapping = {
@@ -42,6 +46,7 @@ def create_index():
             # Text fields are analyzed piece by piece for fuzzy searching
             "name": {"type": "text"},
             "description": {"type": "text"},
+            "category": {"type": "text"},
 
             # Keyword fields are checked for exact matches (good for categories/status)
             "status": {"type": "keyword"},
@@ -53,12 +58,15 @@ def create_index():
     }
 
     # 3. Create the index with 0 replicas (required for single-node Elasticsearch)
-    es.indices.create(
-        index=INDEX_NAME,
-        settings={"number_of_shards": 1, "number_of_replicas": 0},
-        mappings=mapping,
-    )
-    print(f"✅ Successfully created '{INDEX_NAME}' index with mappings!")
+    try:
+        es.indices.create(
+            index=INDEX_NAME,
+            settings={"number_of_shards": 1, "number_of_replicas": 0},
+            mappings=mapping,
+        )
+        print(f"✅ Successfully created '{INDEX_NAME}' index with mappings!")
+    except (ConnectionError, ConnectionTimeout, TransportError, Exception) as exc:
+        logger.warning("Elasticsearch unavailable while creating index: %s", exc)
 
 
 def index_product(product):
@@ -71,6 +79,7 @@ def index_product(product):
         "product_id": product.product_id,
         "name": product.name,
         "description": product.description,
+        "category": product.category,
         "price": float(product.price) if product.price else None,
         "status": product.status,
         "department": product.department.value if product.department else None,
@@ -119,7 +128,14 @@ def search_products(search_string: str):
         "query": {
             "multi_match": {
                 "query": search_string,
-                "fields": ["name", "description"],  # Search both fields!
+                "fields": [
+                    "name^3",
+                    "description",
+                    "category^2",
+                    "department",
+                    "outfit_slot",
+                ],
+                "operator": "or",
                 "fuzziness": "AUTO",  # Allows minor typos (e.g. "denm" -> "denim")
             }
         }

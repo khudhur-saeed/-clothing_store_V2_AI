@@ -253,34 +253,33 @@ Please generate a photorealistic image showing the SAME person from the first im
 }
 
 /**
- * Send a text chat message to Gemini for the store chatbot.
+ * Send a text chat message to Gemini via the backend RAG API for the store chatbot.
  */
 export async function sendChatMessage(history, userMessage) {
-    if (!API_KEY || API_KEY === 'your_gemini_api_key_here') {
-        // Fallback to mock responses when no key is set
+    try {
+        const response = await fetch('http://localhost:8000/api/ai/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                history: history,
+                user_message: userMessage
+            })
+        });
+
+        if (!response.ok) {
+            console.error('Failed to get chat response from backend');
+            return null;
+        }
+
+        const data = await response.json();
+        return {
+            response: data.response || '',
+            products: data.products || []
+        };
+    } catch (err) {
+        console.error('Chat error:', err);
         return null;
     }
-
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-    const systemContext = `You are "Moda Assistant", a helpful customer service chatbot for MODA, a premium fashion e-commerce store.
-You help customers with: finding products, sizing advice, order tracking, returns, styling tips, and promotions.
-Be friendly, concise, and fashion-forward. Keep responses under 3 sentences unless a detailed answer is needed.
-Available coupon codes: SAVE10 (10% off $50+), WELCOME20 (20% off $80+), MODA15 (15% off $100+).
-Shipping is free on orders over $150. Returns accepted within 30 days.`;
-
-    const chat = model.startChat({
-        history: [
-            { role: 'user', parts: [{ text: systemContext }] },
-            { role: 'model', parts: [{ text: 'Understood! I\'m ready to help MODA customers.' }] },
-            ...history.map(m => ({
-                role: m.sender_type === 'user' ? 'user' : 'model',
-                parts: [{ text: m.content }],
-            })),
-        ],
-    });
-
-    const result = await chat.sendMessage(userMessage);
-    return result.response.text();
 }

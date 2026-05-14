@@ -3,6 +3,8 @@ import { Send, Plus, MessageCircle, Trash2, Bot } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
+import { sendChatMessage } from '../../utils/geminiService';
+import ProductCarousel from '../../components/ui/ProductCarousel';
 
 const BOT_REPLIES = [
     "I'm here to help! What would you like to know about our products?",
@@ -37,12 +39,28 @@ export default function ChatbotPage() {
 
     const handleSend = async () => {
         if (!input.trim() || !activeConv) return;
-        const msg = input.trim(); setInput('');
+        const msg = input.trim();
+        setInput('');
         sendMessage(activeConv, msg);
         setTyping(true);
-        await new Promise(r => setTimeout(r, 900 + Math.random() * 800));
-        const reply = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
-        addBotMessage(activeConv, reply);
+
+        try {
+            const history = currentConv?.messages || [];
+            const aiResponse = await sendChatMessage(history, msg);
+            
+            if (aiResponse) {
+                const reply = aiResponse.response || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+                const products = aiResponse.products || [];
+                addBotMessage(activeConv, reply, products);
+            } else {
+                const fallback = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+                addBotMessage(activeConv, fallback);
+            }
+        } catch {
+            const fallback = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+            addBotMessage(activeConv, fallback);
+        }
+
         setTyping(false);
     };
 
@@ -115,7 +133,12 @@ export default function ChatbotPage() {
                                             </div>
                                         )}
                                         <div className="flex-col" style={{ gap: 4, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '75%' }}>
-                                            <div className={`chat-bubble ${msg.sender_type}`}>{msg.content}</div>
+                                            {msg.content && <div className={`chat-bubble ${msg.sender_type}`}>{msg.content}</div>}
+                                            {msg.products && msg.products.length > 0 && (
+                                                <div style={{ marginTop: 8, marginBottom: 4 }}>
+                                                    <ProductCarousel products={msg.products} />
+                                                </div>
+                                            )}
                                             <div className="text-xs text-faint">{formatTime(msg.sent_at)}</div>
                                         </div>
                                     </div>

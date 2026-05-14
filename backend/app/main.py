@@ -5,10 +5,10 @@ from app.routers import auth, products, cart, orders, addresses, favorites, revi
 
 app = FastAPI(title="Moda Clothing Store API", version="1.0.0")
 
-# Allow the React frontend (port 5173) to call this backend (port 8000)
+# Allow the React frontend (port 5173 and 5174) to call this backend (port 8000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
