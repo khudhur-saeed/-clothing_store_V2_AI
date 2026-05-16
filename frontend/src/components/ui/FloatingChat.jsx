@@ -3,6 +3,7 @@ import { MessageCircle, X, Send, Bot, Plus, Minimize2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { sendChatMessage } from '../../utils/geminiService';
+import ProductCarousel from './ProductCarousel';
 
 const BOT_REPLIES = [
     "I'm here to help! What would you like to know?",
@@ -22,26 +23,57 @@ export default function FloatingChat() {
     const [typing, setTyping] = useState(false);
     const [unread, setUnread] = useState(0);
     const messagesEndRef = useRef(null);
+    const messagesContainerRef = useRef(null);
+    const firstScrollRef = useRef(true);
 
     // Active conversation — pick the first one or create one on first open
     const [convId, setConvId] = useState(null);
     const conv = conversations.find(c => c.conversation_id === convId);
 
+    const ensureWelcomeMessage = () => {
+        if (!convId) return;
+        if (conv?.messages && conv.messages.length > 0) return;
+        addBotMessage(convId, BOT_REPLIES[0]);
+    };
+
     useEffect(() => {
-        if (open && !convId) {
+        if (!open || convId) return;
+
+        const ensureConversation = async () => {
             if (conversations.length > 0) {
                 setConvId(conversations[0].conversation_id);
             } else {
-                const newConv = createConversation('Chat with Moda');
-                setConvId(newConv.conversation_id);
+                const newConv = await createConversation('Chat with Moda');
+                if (newConv?.conversation_id) {
+                    setConvId(newConv.conversation_id);
+                }
             }
             setUnread(0);
-        }
-    }, [open]);
+        };
+
+        ensureConversation();
+    }, [open, convId, conversations.length]);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [conv?.messages.length, typing]);
+        if (open) {
+            ensureWelcomeMessage();
+        }
+    }, [open, convId, conv?.messages?.length]);
+
+    const scrollMessagesToBottom = (behavior) => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior,
+        });
+    };
+
+    useEffect(() => {
+        const behavior = firstScrollRef.current ? 'auto' : 'smooth';
+        firstScrollRef.current = false;
+        requestAnimationFrame(() => scrollMessagesToBottom(behavior));
+    }, [conv?.messages.length, typing, convId, open]);
 
     const handleSend = async () => {
         if (!input.trim() || !convId) return;
@@ -54,17 +86,20 @@ export default function FloatingChat() {
             // Try real Gemini chat first
             const history = conv?.messages || [];
             const aiReply = await sendChatMessage(history, msg);
-            const reply = aiReply || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
-            addBotMessage(convId, reply);
+            const reply = aiReply?.response || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+            const products = aiReply?.products || [];
+            addBotMessage(convId, reply, products);
         } catch {
             addBotMessage(convId, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)]);
         }
         setTyping(false);
     };
 
-    const handleNewConv = () => {
-        const newConv = createConversation('New chat');
-        setConvId(newConv.conversation_id);
+    const handleNewConv = async () => {
+        const newConv = await createConversation('New chat');
+        if (newConv?.conversation_id) {
+            setConvId(newConv.conversation_id);
+        }
     };
 
     const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -114,7 +149,7 @@ export default function FloatingChat() {
                     )}
 
                     {/* Messages */}
-                    <div className="fc-messages">
+                    <div className="fc-messages" ref={messagesContainerRef}>
                         {!user && (
                             <div className="fc-guest-note">
                                 <Bot size={16} />
@@ -126,8 +161,13 @@ export default function FloatingChat() {
                                 {msg.sender_type === 'bot' && (
                                     <div className="fc-bot-dot"><Bot size={10} /></div>
                                 )}
-                                <div className="flex-col" style={{ gap: 2, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+                                <div className="flex-col" style={{ gap: 2, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', width: '100%' }}>
                                     <div className={`chat-bubble ${msg.sender_type}`} style={{ fontSize: 13 }}>{msg.content}</div>
+                                    {msg.products && msg.products.length > 0 && (
+                                        <div style={{ marginTop: 8, marginBottom: 4, width: '100%' }}>
+                                            <ProductCarousel products={msg.products} />
+                                        </div>
+                                    )}
                                     <div className="text-xs" style={{ color: 'var(--clr-text-3)', padding: '0 4px' }}>{formatTime(msg.sent_at)}</div>
                                 </div>
                             </div>

@@ -15,7 +15,7 @@ export default function AdminDashboard() {
         setLoading(true);
         try {
             const [orders, products] = await Promise.all([
-                apiCall('/orders/').catch(() => []),
+                apiCall('/orders/all').catch(() => []),
                 apiCall('/products/').catch(() => []),
             ]);
             const revenue = orders.reduce((s, o) => s + Number(o.total_price || 0), 0);

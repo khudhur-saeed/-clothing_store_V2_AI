@@ -33,6 +33,28 @@ export function AppProvider({ children }) {
         setAddresses([]);
         setOrders([]);
         setOutfits([]); // Clear saved outfits on logout
+        setConversations([]);
+    };
+
+    const normalizeConversation = (c) => {
+        const messages = (c.messages || []).map((m) => ({
+            message_id: m.message_id,
+            sender_type: m.sender_type,
+            content: m.content || '',
+            sent_at: m.sent_at,
+            products: m.products || [],
+        }));
+
+        const fallbackTitle = messages.find((m) => m.sender_type === 'user')?.content || 'Chat with Moda';
+        const title = (c.title || String(fallbackTitle).slice(0, 32) || 'Chat with Moda').trim();
+
+        return {
+            conversation_id: c.conversation_id ?? c.id,
+            user_id: c.user_id ?? c.userId,
+            title,
+            started_at: c.started_at,
+            messages,
+        };
     };
 
     // Fetch data from API if logged in
@@ -40,17 +62,21 @@ export function AppProvider({ children }) {
         const token = localStorage.getItem('moda_token');
         if (!token) return;
         try {
-            const [favs, addrs, ords, outfitsList] = await Promise.all([
+            const [favs, addrs, ords, outfitsList, convs] = await Promise.all([
                 apiCall('/favorites/'),
                 apiCall('/addresses/'),
                 apiCall('/orders/'),
                 apiCall('/outfits/', {}, { type: 'my' }).catch(() => []),
+                apiCall('/conversations/').catch(() => []),
             ]);
             setFavorites(favs.map(f => f.product_id));
             setAddresses(addrs);
             setOrders(ords);
             if (Array.isArray(outfitsList)) {
                 setOutfits(outfitsList.map(normalizePersistedOutfit));
+            }
+            if (Array.isArray(convs)) {
+                setConversations(convs.map(normalizeConversation));
             }
         } catch (err) {
             console.warn('Failed to fetch user data:', err.message);
@@ -256,24 +282,137 @@ export function AppProvider({ children }) {
         }
     };
 
-    // --- Conversations (local) ---
-    const sendMessage = (conversationId, content) => {
+    // --- Conversations (persisted) ---
+    const sendMessage = async (conversationId, content) => {
+        const token = localStorage.getItem('moda_token');
+        const tempId = Date.now();
+        const optimistic = { message_id: tempId, sender_type: 'user', content, sent_at: new Date().toISOString() };
+
         setConversations(prev => prev.map(c => c.conversation_id === conversationId
-            ? { ...c, messages: [...c.messages, { message_id: Date.now(), sender_type: 'user', content, sent_at: new Date().toISOString() }] }
+            ? { ...c, messages: [...c.messages, optimistic] }
             : c));
+
+        if (!token) return;
+
+        try {
+            const saved = await apiCall(`/conversations/${conversationId}/messages`, { method: 'POST' }, {
+                conversation_id: conversationId,
+                content,
+                sender_type: 'user',
+            });
+
+            setConversations(prev => prev.map(c => {
+                if (c.conversation_id !== conversationId) return c;
+                return {
+                    ...c,
+                    messages: c.messages.map(m => m.message_id === tempId
+                        ? { ...m, message_id: saved.message_id, sent_at: saved.sent_at }
+                        : m),
+                };
+            }));
+        } catch (err) {
+            console.error('Failed to save message:', err.message);
+        }
     };
-    const addBotMessage = (conversationId, content, products = null) => {
-        setConversations(prev => prev.map(c => c.conversation_id === conversationId
-            ? { ...c, messages: [...c.messages, { message_id: Date.now() + 1, sender_type: 'bot', content, products: products || [], sent_at: new Date().toISOString() }] }
-            : c));
-    };
-    const createConversation = (title = 'New conversation') => {
-        const newConv = {
-            conversation_id: Date.now(), user_id: 1, title, started_at: new Date().toISOString(),
-            messages: [{ message_id: 1, sender_type: 'bot', content: "Hello! I'm Moda Assistant. How can I help you today?", sent_at: new Date().toISOString() }]
+
+    const addBotMessage = async (conversationId, content, products = null) => {
+        const token = localStorage.getItem('moda_token');
+        const tempId = Date.now() + 1;
+        const optimistic = {
+            message_id: tempId,
+            sender_type: 'bot',
+            content,
+            products: products || [],
+            sent_at: new Date().toISOString(),
         };
-        setConversations(prev => [newConv, ...prev]);
-        return newConv;
+
+        setConversations(prev => prev.map(c => c.conversation_id === conversationId
+            ? { ...c, messages: [...c.messages, optimistic] }
+            : c));
+
+        if (!token) return;
+
+        try {
+            const saved = await apiCall(`/conversations/${conversationId}/messages`, { method: 'POST' }, {
+                conversation_id: conversationId,
+                content,
+                sender_type: 'bot',
+            });
+
+            setConversations(prev => prev.map(c => {
+                if (c.conversation_id !== conversationId) return c;
+                return {
+                    ...c,
+                    messages: c.messages.map(m => m.message_id === tempId
+                        ? { ...m, message_id: saved.message_id, sent_at: saved.sent_at }
+                        : m),
+                };
+            }));
+        } catch (err) {
+            console.error('Failed to save bot message:', err.message);
+        }
+    };
+
+    const createConversation = async (title = 'Chat with Moda') => {
+        const token = localStorage.getItem('moda_token');
+        if (!token) {
+            const newConv = {
+                conversation_id: Date.now(),
+                user_id: 1,
+                title,
+                started_at: new Date().toISOString(),
+                messages: [],
+            };
+            setConversations(prev => [newConv, ...prev]);
+            return newConv;
+        }
+
+        try {
+            const saved = await apiCall('/conversations/', { method: 'POST' }, { title });
+            const newConv = {
+                conversation_id: saved.conversation_id,
+                user_id: saved.user_id,
+                title: saved.title || title,
+                started_at: saved.started_at,
+                messages: [],
+            };
+            setConversations(prev => [newConv, ...prev]);
+            return newConv;
+        } catch (err) {
+            console.error('Failed to create conversation:', err.message);
+            return null;
+        }
+    };
+
+    const renameConversation = async (conversationId, title) => {
+        const token = localStorage.getItem('moda_token');
+        const nextTitle = (title || '').trim();
+        if (!nextTitle) return;
+
+        setConversations(prev => prev.map(c => c.conversation_id === conversationId
+            ? { ...c, title: nextTitle }
+            : c));
+
+        if (!token) return;
+
+        try {
+            await apiCall(`/conversations/${conversationId}`, { method: 'PUT' }, { title: nextTitle });
+        } catch (err) {
+            console.error('Failed to rename conversation:', err.message);
+        }
+    };
+
+    const deleteConversation = async (conversationId) => {
+        const token = localStorage.getItem('moda_token');
+        setConversations(prev => prev.filter(c => c.conversation_id !== conversationId));
+
+        if (!token) return;
+
+        try {
+            await apiCall(`/conversations/${conversationId}`, { method: 'DELETE' });
+        } catch (err) {
+            console.error('Failed to delete conversation:', err.message);
+        }
     };
 
     // --- Toast ---
@@ -302,7 +441,7 @@ export function AppProvider({ children }) {
             addresses, addAddress, updateAddress, deleteAddress, setDefaultAddress,
             outfits, createOutfit, addToOutfit, removeFromOutfit, deleteOutfit, refreshOutfits,
             orders, placeOrder, fetchUserData, clearUserData,
-            conversations, sendMessage, addBotMessage, createConversation,
+            conversations, sendMessage, addBotMessage, createConversation, renameConversation, deleteConversation,
             toast, showToast,
         }}>
             {children}

@@ -115,7 +115,7 @@ export default function AdminProductsPage() {
     const [editId, setEditId] = useState(null);
     const [saving, setSaving] = useState(false);
 
-    const [form, setForm] = useState({ name: '', description: '', categoryId: '', pieceType: 'Tops', department: 'Unisex', price: '', status: 'inactive' });
+    const [form, setForm] = useState({ name: '', description: '', categoryId: '', pieceType: 'Tops', department: 'Women', price: '', status: 'inactive' });
     const [formErrors, setFormErrors] = useState({});
     const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -170,7 +170,7 @@ export default function AdminProductsPage() {
         setEditId(null);
         setForm({
             name: '', description: '', categoryId: categoryOptions[0] ? String(categoryOptions[0].id) : '',
-            pieceType: 'Tops', department: 'Unisex', price: '', status: 'inactive'
+            pieceType: 'Tops', department: 'Women', price: '', status: 'inactive'
         });
         setFormErrors({});
         setVariants([emptyVariant()]);
@@ -187,7 +187,7 @@ export default function AdminProductsPage() {
             name: p.name, description: p.description || '',
             categoryId: String(p.category_id ?? fallbackCategory?.id ?? ''),
             pieceType: normalizePieceType(p.piece_type || p.outfit_slot) || 'Tops',
-            department: p.department || 'Unisex',
+            department: p.department || 'Women',
             price: String(p.price), status: normalizeProductStatus(p.status)
         });
         try {
@@ -459,7 +459,7 @@ export default function AdminProductsPage() {
                                         <div className="form-group" style={{ margin: 0 }}>
                                             <label className="form-label">Department *</label>
                                             <select className="form-select" value={form.department} onChange={set('department')}>
-                                                {['Men', 'Women', 'Boys', 'Girls', 'Unisex'].map(d => <option key={d} value={d}>{d}</option>)}
+                                                {['Men', 'Women'].map(d => <option key={d} value={d}>{d}</option>)}
                                             </select>
                                         </div>
                                         <div className="form-group" style={{ margin: 0 }}>

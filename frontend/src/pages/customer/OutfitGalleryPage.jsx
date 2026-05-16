@@ -17,7 +17,7 @@ import Tabs from '../../components/ui/Tabs';
 import CommunityOutfitCard from '../../components/ui/CommunityOutfitCard';
 
 const VALID_SECTIONS = new Set(['my', 'community', 'create']);
-const DEPARTMENTS = ['Women', 'Men', 'Boys', 'Girls', 'Unisex'];
+const DEPARTMENTS = ['Women', 'Men'];
 
 function normalizeEnum(value) {
     if (typeof value !== 'string') return value || '';

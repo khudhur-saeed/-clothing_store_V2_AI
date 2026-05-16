@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Plus, MessageCircle, Trash2, Bot } from 'lucide-react';
+import { Send, Plus, MessageCircle, Trash2, Bot, Pencil } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { Link } from 'react-router-dom';
@@ -17,18 +17,31 @@ const BOT_REPLIES = [
 ];
 
 export default function ChatbotPage() {
-    const { conversations, sendMessage, addBotMessage, createConversation } = useApp();
+    const { conversations, sendMessage, addBotMessage, createConversation, renameConversation, deleteConversation } = useApp();
     const { user } = useAuth();
     const [activeConv, setActiveConv] = useState(conversations[0]?.conversation_id || null);
     const [input, setInput] = useState('');
     const [typing, setTyping] = useState(false);
     const messagesEndRef = useRef(null);
+    const messagesContainerRef = useRef(null);
+    const firstScrollRef = useRef(true);
 
     const currentConv = conversations.find(c => c.conversation_id === activeConv);
 
+    const scrollMessagesToBottom = (behavior) => {
+        const container = messagesContainerRef.current;
+        if (!container) return;
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior,
+        });
+    };
+
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [currentConv?.messages.length, typing]);
+        const behavior = firstScrollRef.current ? 'auto' : 'smooth';
+        firstScrollRef.current = false;
+        requestAnimationFrame(() => scrollMessagesToBottom(behavior));
+    }, [currentConv?.messages.length, typing, activeConv]);
 
     if (!user) return (
         <div className="page container text-center" style={{ paddingTop: 'var(--sp-20)' }}>
@@ -64,9 +77,27 @@ export default function ChatbotPage() {
         setTyping(false);
     };
 
-    const handleNewConv = () => {
-        const conv = createConversation('New conversation');
-        setActiveConv(conv.conversation_id);
+    const handleNewConv = async () => {
+        const conv = await createConversation('Chat with Moda');
+        if (conv?.conversation_id) {
+            setActiveConv(conv.conversation_id);
+        }
+    };
+
+    const handleRenameConv = async (conversationId, currentTitle) => {
+        const nextTitle = window.prompt('Rename conversation', currentTitle || 'Chat with Moda');
+        if (nextTitle == null) return;
+        await renameConversation(conversationId, nextTitle);
+    };
+
+    const handleDeleteConv = async (conversationId) => {
+        const confirmed = window.confirm('Delete this conversation?');
+        if (!confirmed) return;
+        await deleteConversation(conversationId);
+        if (activeConv === conversationId) {
+            const remaining = conversations.filter(c => c.conversation_id !== conversationId);
+            setActiveConv(remaining[0]?.conversation_id || null);
+        }
     };
 
     const formatTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -90,8 +121,26 @@ export default function ChatbotPage() {
                                 onClick={() => setActiveConv(conv.conversation_id)} id={`conv-${conv.conversation_id}`}>
                                 <MessageCircle size={15} />
                                 <div style={{ flex: 1, textAlign: 'left', overflow: 'hidden' }}>
-                                    <div className="font-medium text-sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title}</div>
+                                    <div className="font-medium text-sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conv.title || 'Chat with Moda'}</div>
                                     <div className="text-xs text-faint">{conv.messages.length} messages</div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+                                    <button
+                                        type="button"
+                                        className="btn btn-ghost btn-icon btn-xs"
+                                        title="Rename"
+                                        onClick={() => handleRenameConv(conv.conversation_id, conv.title)}
+                                    >
+                                        <Pencil size={12} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn btn-ghost btn-icon btn-xs"
+                                        title="Delete"
+                                        onClick={() => handleDeleteConv(conv.conversation_id)}
+                                    >
+                                        <Trash2 size={12} />
+                                    </button>
                                 </div>
                             </button>
                         ))}
@@ -124,7 +173,7 @@ export default function ChatbotPage() {
                             </div>
 
                             {/* Messages */}
-                            <div className="chat-messages">
+                            <div className="chat-messages" ref={messagesContainerRef}>
                                 {currentConv.messages.map(msg => (
                                     <div key={msg.message_id} className={`chat-msg ${msg.sender_type === 'user' ? 'user' : 'bot'}`}>
                                         {msg.sender_type === 'bot' && (
@@ -132,7 +181,7 @@ export default function ChatbotPage() {
                                                 <Bot size={14} color="white" />
                                             </div>
                                         )}
-                                        <div className="flex-col" style={{ gap: 4, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '75%' }}>
+                                        <div className="flex-col" style={{ gap: 4, alignItems: msg.sender_type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '75%', width: '100%' }}>
                                             {msg.content && <div className={`chat-bubble ${msg.sender_type}`}>{msg.content}</div>}
                                             {msg.products && msg.products.length > 0 && (
                                                 <div style={{ marginTop: 8, marginBottom: 4 }}>

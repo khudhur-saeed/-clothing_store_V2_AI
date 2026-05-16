@@ -18,12 +18,13 @@ class MessageOut(MessageBase):
         from_attributes = True
 
 class ConversationBase(BaseModel):
-    user_id: int
+    title: Optional[str] = None
 
 class ConversationCreate(ConversationBase):
     pass
 
 class ConversationOut(ConversationBase):
+    user_id: int
     conversation_id: int
     started_at: Optional[datetime] = None
     messages: Optional[List[MessageOut]] = None

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Sparkles, Star, TrendingUp, ShieldCheck, Truck, RefreshCw } from 'lucide-react';
 import { useProducts } from '../../api/products';
 import ProductCard from '../../components/ui/ProductCard';
+import TextPressure from '../../components/ui/TextPressure';
 
 const DEFAULT_SLIDES = [
     { title: 'New Season', sub: 'Arrivals', tag: 'Spring/Summer 2026', cta: 'Shop Collection', img: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=1200&q=80', link: '/products' },
@@ -53,7 +54,21 @@ export default function HomePage() {
                 <div className="hero-overlay" />
                 <div className="container hero-content animate-fadeIn" key={slide}>
                     <span className="hero-tag">{s.tag}</span>
-                    <h1 className="hero-title display">{s.title} <em>{s.sub}</em></h1>
+                    <div className="hero-title-pressure">
+                        <TextPressure
+                            text={`${s.title} ${s.sub}`}
+                            fontFamily="Compressa VF"
+                            fontUrl="https://res.cloudinary.com/dr6lvwubh/raw/upload/v1529908256/CompressaPRO-GX.woff2"
+                            flex={true}
+                            alpha={false}
+                            stroke={false}
+                            width={true}
+                            weight={true}
+                            italic={true}
+                            textColor="#ffffff"
+                            minFontSize={36}
+                        />
+                    </div>
                     <p className="hero-sub">Discover the latest trends in fashion. Premium quality, thoughtfully curated.</p>
                     <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
                         <Link to={s.link} className="btn btn-primary btn-lg" id="hero-cta">
@@ -140,6 +155,7 @@ export default function HomePage() {
         .hero-tag { display: inline-block; background: rgba(192,132,252,0.2); border: 1px solid rgba(192,132,252,0.4); color: var(--clr-primary); padding: 4px 14px; border-radius: var(--r-full); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: var(--sp-5); }
         .hero-title { font-size: clamp(48px, 7vw, 88px); font-weight: 700; color: white; line-height: 1.08; margin-bottom: var(--sp-5); }
         .hero-title em { color: var(--clr-primary); font-style: italic; }
+        .hero-title-pressure { height: clamp(64px, 10vw, 110px); margin-bottom: var(--sp-5); }
         .hero-sub { font-size: 17px; color: rgba(255,255,255,0.75); margin-bottom: var(--sp-8); max-width: 480px; }
         .hero-dots { position: absolute; bottom: var(--sp-8); left: 50%; transform: translateX(-50%); display: flex; gap: var(--sp-2); z-index: 1; }
         .hero-dot { width: 8px; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.3); cursor: pointer; transition: all 0.3s; }

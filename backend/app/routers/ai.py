@@ -139,7 +139,7 @@ If product context is provided below, do not invent products outside that contex
             })
             
         # 3. Generation
-        model = genai.GenerativeModel("gemini-3-flash-preview")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite")
         chat = model.start_chat(history=history_for_gemini)
         response = chat.send_message(request.user_message)
 

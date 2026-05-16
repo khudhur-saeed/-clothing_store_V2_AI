@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { apiCall } from '../../api/client';
 
 const PIECE_TYPES = ['Tops', 'Bottoms', 'Outerwear', 'Shoes', 'Accessories'];
-const VALID_DEPARTMENTS = ['Men', 'Women', 'Boys', 'Girls', 'Unisex'];
+const VALID_DEPARTMENTS = ['Men', 'Women'];
 
 const sanitizeDepartment = (value) => {
     const str = String(value || '').trim();
@@ -112,10 +112,7 @@ export default function OutfitBuilderPage() {
 
                 const safeCategories = [
                     { id: 'Men', name: 'Men' },
-                    { id: 'Women', name: 'Women' },
-                    { id: 'Boys', name: 'Boys' },
-                    { id: 'Girls', name: 'Girls' },
-                    { id: 'Unisex', name: 'Unisex' }
+                    { id: 'Women', name: 'Women' }
                 ];
 
                 const safeProducts = Array.isArray(products) ? products : [];
@@ -210,6 +207,7 @@ export default function OutfitBuilderPage() {
                 const params = {
                     department: departmentStr,
                     piece_type: pieceTypeStr,
+                    strict_department: true,
                 };
 
                 // Debug: Log the fetch request
@@ -223,7 +221,26 @@ export default function OutfitBuilderPage() {
                 if (cancelled) return;
 
                 console.log('✅ Products received:', products);
-                const safeProducts = Array.isArray(products) ? products : [];
+                let safeProducts = Array.isArray(products) ? products : [];
+                
+                // Strict client-side filter to ensure products match the selected department only.
+                // Unisex products are excluded unless the user selects Unisex explicitly.
+                safeProducts = safeProducts.filter(product => {
+                    const productDept = String(product.department || '').trim();
+                    const selectedDept = String(departmentStr).trim();
+
+                    const isMatch = selectedDept === 'Unisex'
+                        ? productDept === 'Unisex'
+                        : productDept === selectedDept;
+                    
+                    if (!isMatch) {
+                        console.warn(`🚫 Filtering out ${product.name} (department: ${productDept}) - selected: ${selectedDept}`);
+                    }
+                    
+                    return isMatch;
+                });
+                
+                console.log(`✅ Filtered products: ${safeProducts.length} items (${departmentStr} only)`);
                 setFilteredProducts(safeProducts);
                 await ensureVariantsLoaded(safeProducts.map((product) => product.product_id));
             } catch (err) {

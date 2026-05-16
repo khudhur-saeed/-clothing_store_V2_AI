@@ -21,28 +21,17 @@ TERMINAL_ORDER_STATUSES = {"delivered", "cancelled"}
 
 
 def parse_department(value: str) -> DepartmentEnum:
-    # UI alias: Kids maps to Unisex for storage.
-    if value == "Kids":
-        return DepartmentEnum.Unisex
-
     try:
         return DepartmentEnum[value]
     except KeyError:
-        valid = [d.name for d in DepartmentEnum] + ["Kids"]
+        valid = [d.name for d in DepartmentEnum]
         raise HTTPException(status_code=400, detail=f"Invalid department. Must be one of: {valid}")
 
 
 def get_department_filter_values(value: str) -> List[DepartmentEnum]:
-    # Customer-facing Kids filter should include all kids-oriented departments.
-    if value == "Kids":
-        return [DepartmentEnum.Boys, DepartmentEnum.Girls, DepartmentEnum.Unisex]
-
     try:
         dept = DepartmentEnum[value]
-        # Always include Unisex products — they fit any department.
-        if dept == DepartmentEnum.Unisex:
-            return [DepartmentEnum.Unisex]
-        return [dept, DepartmentEnum.Unisex]
+        return [dept]
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Invalid department: {value}")
 
@@ -65,7 +54,15 @@ def get_category_or_400(db: Session, category_id: int) -> Category:
 
 def serialize_product(product: Product) -> Dict[str, Any]:
     piece_type = product.piece_type.value if isinstance(product.piece_type, OutfitSlotEnum) else str(product.piece_type)
-    department = product.department.value if isinstance(product.department, DepartmentEnum) else product.department
+    
+    # Ensure department is always properly set
+    if product.department is None:
+        department = "Women"  # Fallback for NULL departments
+    elif isinstance(product.department, DepartmentEnum):
+        department = product.department.value
+    else:
+        department = str(product.department)
+    
     category_name = product.category_rel.name if getattr(product, "category_rel", None) else product.category
 
     return {
@@ -105,8 +102,15 @@ def get_products(
     outfit_slot: Optional[str] = Query(None),
     min_price: Optional[float] = Query(None),
     max_price: Optional[float] = Query(None),
+    strict_department: Optional[bool] = Query(False),
     db: Session = Depends(get_db)
 ):
+    """
+    Get products with optional filters.
+    
+    Parameters:
+    - strict_department: If True, only return products from the exact department
+    """
     q = db.query(Product)
     
     # Only show active products to customers
@@ -139,15 +143,23 @@ def get_products(
         q = q.filter(Product.target_group == target_group)
     # New tier 1: Department
     if department:
-        dept_values = get_department_filter_values(department)
-        if len(dept_values) == 1:
-            q = q.filter(Product.department == dept_values[0])
-        else:
-            q = q.filter(Product.department.in_(dept_values))
+        try:
+            # Parse and validate the department
+            dept_enum = DepartmentEnum[department]
+            
+            if strict_department:
+                # Strict mode: only return products from the exact department
+                q = q.filter(Product.department == dept_enum)
+            else:
+                q = q.filter(Product.department == dept_enum)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid department: {department}")
+    
     # New tier 2: Outfit Slot
     slot_filter = piece_type or clothing_type or outfit_slot
     if slot_filter:
-        q = q.filter(Product.piece_type == parse_piece_type(slot_filter))
+        slot_enum = parse_piece_type(slot_filter)
+        q = q.filter(Product.piece_type == slot_enum)
     
     if min_price is not None:
         q = q.filter(Product.price >= min_price)

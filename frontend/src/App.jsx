@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { AppProvider } from './context/AppContext';
@@ -41,6 +41,9 @@ import AdminHomepagePage from './pages/admin/AdminHomepagePage';
 
 // Customer layout (with header, footer, and floating chat)
 function CustomerLayout() {
+    const location = useLocation();
+    const hideFloatingChat = location.pathname === '/chat';
+
     return (
         <>
             <Header />
@@ -49,7 +52,7 @@ function CustomerLayout() {
             </main>
             <Footer />
             <Toast />
-            <FloatingChat />
+            {!hideFloatingChat && <FloatingChat />}
         </>
     );
 }

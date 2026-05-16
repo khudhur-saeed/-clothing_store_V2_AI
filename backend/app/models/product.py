@@ -7,9 +7,6 @@ class DepartmentEnum(enum.Enum):
     """Tier 1: Department/Target Group"""
     Men = "Men"
     Women = "Women"
-    Boys = "Boys"
-    Girls = "Girls"
-    Unisex = "Unisex"
 
 class OutfitSlotEnum(enum.Enum):
     """Tier 2: Outfit Slot/Piece Type"""
