@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform } from 'motion/react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 import './Carousel.css';
 
@@ -12,11 +14,28 @@ function CarouselItem({ item, index, itemWidth, round, trackItemOffset, x, trans
   const range = [-(index + 1) * trackItemOffset, -index * trackItemOffset, -(index - 1) * trackItemOffset];
   const outputRange = [90, 0, -90];
   const rotateY = useTransform(x, range, outputRange, { clamp: false });
+  const navigate = useNavigate();
+
+  // Track pointer-down position to distinguish click from drag
+  const pointerStartX = useRef(null);
+
+  const handlePointerDown = (e) => {
+    pointerStartX.current = e.clientX;
+  };
+
+  const handleClick = () => {
+    if (pointerStartX.current === null) return;
+    const delta = Math.abs(x.get() - (-(index) * trackItemOffset));
+    // Only navigate if the finger/mouse barely moved (not a drag)
+    if (delta < 5 && item.id) {
+      navigate(`/products/${item.id}`);
+    }
+  };
 
   return (
     <motion.div
       key={`${item?.id ?? index}-${index}`}
-      className={`carousel-item ${round ? 'round' : ''}`}
+      className={`carousel-item ${round ? 'round' : ''} ${item.id ? 'carousel-item-clickable' : ''}`}
       style={{
         width: itemWidth,
         height: round ? itemWidth : '100%',
@@ -24,6 +43,8 @@ function CarouselItem({ item, index, itemWidth, round, trackItemOffset, x, trans
         ...(round && { borderRadius: '50%' })
       }}
       transition={transition}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handleClick}
     >
       <div className={`carousel-item-header ${round ? 'round' : ''}`}>
         {item.image ? (
@@ -33,7 +54,6 @@ function CarouselItem({ item, index, itemWidth, round, trackItemOffset, x, trans
         )}
       </div>
       <div className="carousel-item-content">
-        <div className="carousel-item-title">{item.title}</div>
         {item.description && <p className="carousel-item-description">{item.description}</p>}
         {item.price && <p className="carousel-item-price">${item.price.toFixed(2)}</p>}
       </div>
@@ -212,6 +232,31 @@ export default function Carousel({
           />
         ))}
       </motion.div>
+
+      {/* Left arrow */}
+      {items.length > 1 && (
+        <button
+          className="carousel-arrow carousel-arrow-left"
+          onClick={() => !isAnimating && setPosition(prev => Math.max(0, prev - 1))}
+          disabled={!loop && position <= 0}
+          aria-label="Previous"
+        >
+          <ChevronLeft size={18} />
+        </button>
+      )}
+
+      {/* Right arrow */}
+      {items.length > 1 && (
+        <button
+          className="carousel-arrow carousel-arrow-right"
+          onClick={() => !isAnimating && setPosition(prev => Math.min(itemsForRender.length - 1, prev + 1))}
+          disabled={!loop && position >= itemsForRender.length - 1}
+          aria-label="Next"
+        >
+          <ChevronRight size={18} />
+        </button>
+      )}
+
       <div className={`carousel-indicators-container ${round ? 'round' : ''}`}>
         <div className="carousel-indicators">
           {items.map((_, index) => (

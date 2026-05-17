@@ -6,13 +6,29 @@ export default function ProductCarousel({ products = [] }) {
   }
 
   // Transform products into carousel items
-  const items = products.map(product => ({
-    id: product.id || product.product_id,
-    title: product.name || product.title,
-    description: product.category || '',
-    price: product.base_price || product.price || 0,
-    image: product.image_url || product.images?.[0] || null,
-  }));
+  const items = products.map(product => {
+    // Extract the first image regardless of data shape:
+    // could be a string URL, { url: '...' } object, or an array of either
+    const rawImage =
+      product.image_url ||
+      product.images?.[0] ||
+      null;
+
+    let imageUrl = null;
+    if (typeof rawImage === 'string') {
+      imageUrl = rawImage;
+    } else if (rawImage && typeof rawImage === 'object') {
+      imageUrl = rawImage.url || rawImage.src || null;
+    }
+
+    return {
+      id: product.id || product.product_id,
+      title: product.name || product.title,
+      description: product.category || '',
+      price: Number(product.base_price || product.price || 0),
+      image: imageUrl,
+    };
+  });
 
   return (
     <Carousel

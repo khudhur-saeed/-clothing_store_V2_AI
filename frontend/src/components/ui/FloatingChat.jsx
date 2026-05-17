@@ -26,6 +26,34 @@ export default function FloatingChat() {
     const messagesContainerRef = useRef(null);
     const firstScrollRef = useRef(true);
 
+    // Resize state
+    const [panelSize, setPanelSize] = useState({ width: 370, height: 560 });
+    const resizeStartRef = useRef(null);
+
+    const handleResizePointerDown = (e) => {
+        e.preventDefault();
+        resizeStartRef.current = {
+            x: e.clientX,
+            y: e.clientY,
+            w: panelSize.width,
+            h: panelSize.height,
+        };
+        const onMove = (ev) => {
+            const dx = resizeStartRef.current.x - ev.clientX; // dragging left = wider
+            const dy = resizeStartRef.current.y - ev.clientY; // dragging up = taller
+            setPanelSize({
+                width:  Math.min(700, Math.max(300, resizeStartRef.current.w + dx)),
+                height: Math.min(800, Math.max(380, resizeStartRef.current.h + dy)),
+            });
+        };
+        const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+    };
+
     // Active conversation — pick the first one or create one on first open
     const [convId, setConvId] = useState(null);
     const conv = conversations.find(c => c.conversation_id === convId);
@@ -119,7 +147,17 @@ export default function FloatingChat() {
 
             {/* Chat panel */}
             {open && (
-                <div className="floating-chat-panel animate-slideUp" id="floating-chat-panel">
+                <div
+                    className="floating-chat-panel animate-slideUp"
+                    id="floating-chat-panel"
+                    style={{ width: panelSize.width, maxHeight: panelSize.height }}
+                >
+                    {/* Resize handle — top-left corner */}
+                    <div
+                        className="fc-resize-handle"
+                        onPointerDown={handleResizePointerDown}
+                        title="Drag to resize"
+                    />
                     {/* Header */}
                     <div className="fc-header">
                         <div className="flex items-center gap-3">
@@ -135,18 +173,7 @@ export default function FloatingChat() {
                         </div>
                     </div>
 
-                    {/* Conversation switcher (if multiple) */}
-                    {conversations.length > 1 && (
-                        <div className="fc-conv-tabs">
-                            {conversations.slice(0, 4).map(c => (
-                                <button key={c.conversation_id}
-                                    className={`fc-conv-tab${convId === c.conversation_id ? ' active' : ''}`}
-                                    onClick={() => setConvId(c.conversation_id)}>
-                                    {c.title.slice(0, 14)}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+
 
                     {/* Messages */}
                     <div className="fc-messages" ref={messagesContainerRef}>
@@ -253,6 +280,34 @@ export default function FloatingChat() {
         }
 
         /* ── Header ── */
+        /* ── Resize handle ── */
+        .fc-resize-handle {
+          position: absolute;
+          top: 0; left: 0;
+          width: 20px; height: 20px;
+          cursor: nw-resize;
+          z-index: 10;
+          border-radius: var(--r-xl) 0 0 0;
+          /* two diagonal lines as visual hint */
+          background:
+            linear-gradient(135deg,
+              rgba(168,85,247,0.55) 0px, rgba(168,85,247,0.55) 1.5px,
+              transparent 1.5px 6px,
+              rgba(168,85,247,0.35) 6px, rgba(168,85,247,0.35) 7.5px,
+              transparent 7.5px
+            );
+        }
+        .fc-resize-handle:hover {
+          background:
+            linear-gradient(135deg,
+              rgba(168,85,247,0.9) 0px, rgba(168,85,247,0.9) 1.5px,
+              transparent 1.5px 6px,
+              rgba(168,85,247,0.65) 6px, rgba(168,85,247,0.65) 7.5px,
+              transparent 7.5px
+            );
+        }
+
+        /* ── Header ── */
         .fc-header {
           display: flex; align-items: center; justify-content: space-between;
           padding: var(--sp-4) var(--sp-5);
@@ -267,14 +322,7 @@ export default function FloatingChat() {
           box-shadow: 0 0 14px rgba(168,85,247,0.45);
         }
 
-        /* ── Conversation tabs ── */
-        .fc-conv-tabs {
-          display: flex; gap: 4px; padding: 6px 10px;
-          border-bottom: 1px solid var(--glass-border);
-          background: rgba(168,85,247,0.04); overflow-x: auto;
-        }
-        .fc-conv-tab { padding: 4px 10px; border-radius: var(--r-full); font-size: 11px; font-weight: 600; color: var(--clr-text-3); white-space: nowrap; transition: all var(--tr-fast); }
-        .fc-conv-tab:hover, .fc-conv-tab.active { background: rgba(168,85,247,0.14); color: var(--clr-primary); box-shadow: 0 0 8px rgba(168,85,247,0.12); }
+
 
         /* ── Messages area ── */
         .fc-messages {

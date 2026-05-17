@@ -65,6 +65,23 @@ def add_review(
     if product.status != 'active':
         raise HTTPException(status_code=404, detail="Product not found")
     
+    # Check if user has purchased the product
+    from app.models.order import Order, OrderItem
+    from app.models.product_variant import ProductVariant
+    
+    has_bought = (
+        db.query(Order)
+        .join(OrderItem, Order.orderid == OrderItem.orderid)
+        .join(ProductVariant, OrderItem.variant_id == ProductVariant.variant_id)
+        .filter(
+            Order.user_id == current_user.user_id,
+            ProductVariant.product_id == product_id
+        )
+        .first()
+    )
+    if not has_bought:
+        raise HTTPException(status_code=403, detail="You can only review products you have purchased")
+
     final_rating = payload.rating if payload is not None else rating
     final_comment = payload.comment if payload is not None else comment
 

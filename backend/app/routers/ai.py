@@ -13,6 +13,7 @@ import google.generativeai as genai
 from app.core.config import settings
 from app.dependencies import get_db
 from app.models.product import Product
+from app.models.product_variant import ProductVariant
 from app.core.search import search_products
 
 # Configure Gemini with the API key from environment variables
@@ -147,6 +148,21 @@ If product context is provided below, do not invent products outside that contex
         # Always include concrete product lines when we found matched items.
         final_text += _format_products_for_user(products)
 
+        # Build a quick product_id -> first image URL map
+        product_ids = [p.product_id for p in products]
+        variants = (
+            db.query(ProductVariant)
+            .filter(ProductVariant.product_id.in_(product_ids))
+            .all()
+        )
+        first_image_by_product = {}
+        for v in variants:
+            if v.product_id not in first_image_by_product:
+                images = v.images or []
+                if images:
+                    img = images[0]
+                    first_image_by_product[v.product_id] = img if isinstance(img, str) else (img.get("url") or img.get("src") or "")
+
         return {
             "response": final_text,
             "products": [
@@ -160,6 +176,7 @@ If product context is provided below, do not invent products outside that contex
                     "status": p.status,
                     "category": p.category or "",
                     "description": (p.description[:100] + "...") if p.description and len(p.description) > 100 else p.description,
+                    "image_url": first_image_by_product.get(p.product_id, ""),
                 }
                 for p in products
             ],
