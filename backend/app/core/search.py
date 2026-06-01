@@ -83,7 +83,7 @@ def index_product(product):
         "price": float(product.price) if product.price else None,
         "status": product.status,
         "department": product.department.value if product.department else None,
-        "outfit_slot": product.outfit_slot.value if product.outfit_slot else None,
+        "outfit_slot": product.piece_type.value if product.piece_type else None,
     }
 
     try:
