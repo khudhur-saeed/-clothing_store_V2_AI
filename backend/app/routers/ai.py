@@ -1,19 +1,25 @@
+import io
 import os
-from base64 import b64encode
+import base64
+import urllib.request
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from PIL import Image, ImageDraw, ImageFont
+from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 import google.generativeai as genai
+import httpx
 
 from app.core.config import settings
-from app.dependencies import get_db
+from app.core.cloud_storage import upload_ai_image
+from app.dependencies import get_db, get_current_user
 from app.models.product import Product
 from app.models.product_variant import ProductVariant
+from app.models.outfit import Outfit, OutfitProduct
 from app.core.search import search_products
 
 # Configure Gemini with the API key from environment variables
@@ -209,6 +215,265 @@ def image_base64(url: str = Query(..., description="Public image URL to fetch an
         raise HTTPException(status_code=400, detail="URL did not return an image")
 
     return {
-        "data": b64encode(data).decode("utf-8"),
+        "data": base64.b64encode(data).decode("utf-8"),
         "mime_type": content_type,
     }
+
+
+# ---------------------------------------------------------------------------
+# Helper: download an image from a URL and return raw bytes
+# ---------------------------------------------------------------------------
+def _download_image(url: str) -> bytes:
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urlopen(req, timeout=20) as resp:
+        return resp.read()
+
+
+# ---------------------------------------------------------------------------
+# Helper: create a Pillow outfit collage from a list of image byte arrays
+# ---------------------------------------------------------------------------
+def _build_outfit_collage(images_bytes: list[bytes], outfit_name: str) -> bytes:
+    CELL = 320          # each product cell size (px)
+    COLS = min(len(images_bytes), 3)
+    ROWS = (len(images_bytes) + COLS - 1) // COLS
+    PAD = 20
+    HEADER = 60
+
+    W = COLS * CELL + (COLS + 1) * PAD
+    H = ROWS * CELL + (ROWS + 1) * PAD + HEADER
+
+    canvas = Image.new("RGB", (W, H), (18, 18, 22))      # dark background
+
+    # Header text
+    draw = ImageDraw.Draw(canvas)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+    except Exception:
+        font = ImageFont.load_default()
+
+    draw.text((PAD, PAD), outfit_name, fill=(220, 180, 255), font=font)
+
+    for idx, img_bytes in enumerate(images_bytes):
+        try:
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        except Exception:
+            continue
+
+        img.thumbnail((CELL, CELL), Image.LANCZOS)
+        # Centre-crop to exact cell size
+        bg = Image.new("RGB", (CELL, CELL), (30, 30, 38))
+        x_off = (CELL - img.width) // 2
+        y_off = (CELL - img.height) // 2
+        bg.paste(img, (x_off, y_off))
+
+        col = idx % COLS
+        row = idx // COLS
+        x = PAD + col * (CELL + PAD)
+        y = HEADER + PAD + row * (CELL + PAD)
+        canvas.paste(bg, (x, y))
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 1 – Generate AI Outfit Image (Pillow collage → Cloudinary)
+# ---------------------------------------------------------------------------
+@router.post("/generate-outfit-image")
+def generate_outfit_image(
+    outfit_id: int = Form(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Build a collage image from all products in an outfit, upload it to
+    Cloudinary, persist the URL in the outfit row, and return the URL.
+    """
+    outfit = (
+        db.query(Outfit)
+        .filter(Outfit.outfit_id == outfit_id, Outfit.user_id == user.user_id)
+        .first()
+    )
+    if not outfit:
+        raise HTTPException(status_code=404, detail="Outfit not found")
+
+    # Collect variant image URLs for each product in the outfit
+    outfit_products = (
+        db.query(OutfitProduct).filter(OutfitProduct.outfit_id == outfit_id).all()
+    )
+    if not outfit_products:
+        raise HTTPException(status_code=400, detail="Outfit has no products")
+
+    image_urls: list[str] = []
+    for op in outfit_products:
+        variant = (
+            db.query(ProductVariant)
+            .filter(ProductVariant.variant_id == op.variant_id)
+            .first()
+        )
+        if not variant:
+            continue
+        imgs = variant.images or []
+        for img in imgs:
+            url = img if isinstance(img, str) else (img.get("url") or img.get("src") or "")
+            if url:
+                image_urls.append(url)
+                break  # one image per product is enough
+
+    if not image_urls:
+        raise HTTPException(status_code=400, detail="No product images found")
+
+    # Download all product images
+    images_bytes: list[bytes] = []
+    for url in image_urls:
+        try:
+            images_bytes.append(_download_image(url))
+        except Exception:
+            pass  # skip broken URLs
+
+    if not images_bytes:
+        raise HTTPException(status_code=502, detail="Could not download any product images")
+
+    # Build collage
+    collage_bytes = _build_outfit_collage(images_bytes, outfit.name)
+
+    # Upload to Cloudinary
+    cloudinary_url = upload_ai_image(collage_bytes, user_id=user.user_id, folder_suffix="outfit_preview")
+
+    # Persist the URL
+    outfit.generated_image_url = cloudinary_url
+    db.commit()
+
+    return {"image_url": cloudinary_url, "outfit_id": outfit_id}
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 2 – Virtual Try-On (Gemini 2.0 Flash → Cloudinary)
+# ---------------------------------------------------------------------------
+@router.post("/virtual-try-on")
+async def virtual_try_on(
+    product_id: int = Form(...),
+    user_photo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Accept the user's photo + a product ID. Pass both images to Gemini 2.0
+    Flash image generation and return a virtual try-on result stored on
+    Cloudinary.
+    """
+    # 1. Get product image
+    product = db.query(Product).filter(Product.product_id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    variant = (
+        db.query(ProductVariant)
+        .filter(ProductVariant.product_id == product_id)
+        .first()
+    )
+    product_image_url = ""
+    if variant:
+        imgs = variant.images or []
+        for img in imgs:
+            product_image_url = img if isinstance(img, str) else (img.get("url") or img.get("src") or "")
+            if product_image_url:
+                break
+
+    if not product_image_url:
+        raise HTTPException(status_code=400, detail="Product has no image")
+
+    # 2. Read uploaded user photo
+    user_photo_bytes = await user_photo.read()
+    if not user_photo_bytes:
+        raise HTTPException(status_code=400, detail="User photo is empty")
+
+    # 3. Download product image
+    try:
+        product_image_bytes = _download_image(product_image_url)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch product image: {exc}")
+
+    # 4. Call Gemini 2.0 Flash image generation via REST API
+    gemini_url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.0-flash-preview-image-generation:generateContent"
+        f"?key={settings.VITE_GEMINI_API_KEY}"
+    )
+
+    user_mime = user_photo.content_type or "image/jpeg"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": (
+                            f"You are a virtual fashion try-on assistant. "
+                            f"Generate a photorealistic image showing the person in the first photo "
+                            f"wearing the '{product.name}' clothing item shown in the second photo. "
+                            f"Preserve the person's face, skin tone, hair, and body shape exactly. "
+                            f"The clothing should fit naturally and look realistic. "
+                            f"Keep the same lighting and background style as the person's photo."
+                        )
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": user_mime,
+                            "data": base64.b64encode(user_photo_bytes).decode(),
+                        }
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64.b64encode(product_image_bytes).decode(),
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["IMAGE", "TEXT"]
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(gemini_url, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = f"Gemini API error {exc.response.status_code}: {exc.response.text[:300]}"
+        raise HTTPException(status_code=502, detail=detail)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}")
+
+    # 5. Extract image bytes from Gemini response
+    generated_bytes: bytes | None = None
+    for candidate in result.get("candidates", []):
+        for part in candidate.get("content", {}).get("parts", []):
+            if "inlineData" in part:
+                generated_bytes = base64.b64decode(part["inlineData"]["data"])
+                break
+            if "inline_data" in part:
+                generated_bytes = base64.b64decode(part["inline_data"]["data"])
+                break
+        if generated_bytes:
+            break
+
+    if not generated_bytes:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini did not return an image. The model may not support image generation for this input.",
+        )
+
+    # 6. Upload to Cloudinary
+    cloudinary_url = upload_ai_image(generated_bytes, user_id=user.user_id, folder_suffix="try_on")
+
+    return {
+        "image_url": cloudinary_url,
+        "product_id": product_id,
+        "product_name": product.name,
+    }
+

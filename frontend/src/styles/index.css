@@ -32,7 +32,7 @@
 
   --clr-text: #f0eeff;
   --clr-text-2: #a8a6cc;
-  --clr-text-3: #636080;
+  --clr-text-3: #8a87b0;
   --clr-text-inv: #ffffff;
 
   /* Glass surfaces */
@@ -83,17 +83,17 @@
   --clr-primary-h: #9d74f8;
   --clr-primary-d: #7c3aed;
   --clr-accent: #c026d3;
-  --clr-gold: #d97706;
-  --clr-gold-light: #fbbf24;
-  --clr-gold-dark: #b45309;
-  --clr-success: #059669;
-  --clr-warning: #d97706;
-  --clr-error: #dc2626;
-  --clr-info: #2563eb;
+  --clr-gold: #92580a;
+  --clr-gold-light: #b46d0f;
+  --clr-gold-dark: #7c4a00;
+  --clr-success: #047857;
+  --clr-warning: #92580a;
+  --clr-error: #b91c1c;
+  --clr-info: #1d4ed8;
 
   --clr-text: #1a1030;
-  --clr-text-2: #4a3a7a;
-  --clr-text-3: #8070a8;
+  --clr-text-2: #3a2c6a;
+  --clr-text-3: #5c4d8a;
   --clr-text-inv: #ffffff;
 
   --glass-bg: rgba(255, 255, 255, 0.65);
@@ -675,7 +675,7 @@ body::after {
 .form-label {
   font-size: 11px;
   font-weight: 700;
-  color: var(--clr-text-3);
+  color: var(--clr-text-2);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1058,7 +1058,7 @@ th {
   background: var(--glass-bg-heavy);
   backdrop-filter: var(--glass-blur-sm);
   -webkit-backdrop-filter: var(--glass-blur-sm);
-  color: var(--clr-text-3);
+  color: var(--clr-text-2);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -1084,7 +1084,7 @@ tr:hover td {
 }
 
 .star {
-  color: var(--clr-border-2);
+  color: var(--clr-text-3);
   font-size: 14px;
 }
 
@@ -1324,7 +1324,7 @@ tr:hover td {
   padding: 12px 20px;
   font-size: 14px;
   font-weight: 500;
-  color: var(--clr-text-3);
+  color: var(--clr-text-2);
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
   cursor: pointer;
@@ -1546,7 +1546,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .timeline-content p {
   font-size: 13px;
-  color: var(--clr-text-3);
+  color: var(--clr-text-2);
 }
 
 /* ── CHAT BUBBLES ── */

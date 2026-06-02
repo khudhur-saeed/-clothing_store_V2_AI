@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Plus, X, Eye, Lock, Trash2, Package, Sparkles, Save } from 'lucide-react';
+import { Plus, X, Eye, Lock, Trash2, Package, Sparkles, Save, Download, RefreshCw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { apiCall } from '../../api/client';
@@ -52,6 +52,9 @@ export default function OutfitBuilderPage() {
     const [filteredProducts, setFilteredProducts] = useState([]);
     const [loadingPicker, setLoadingPicker] = useState(false);
     const [savingOutfit, setSavingOutfit] = useState(false);
+    const [generatingImage, setGeneratingImage] = useState(false);
+    const [generatedImageUrl, setGeneratedImageUrl] = useState(null);
+    const [generatedForOutfitId, setGeneratedForOutfitId] = useState(null);
 
     const currentOutfit = useMemo(
         () => outfits.find((outfit) => outfit.outfit_id === selectedOutfitId) || null,
@@ -403,6 +406,36 @@ export default function OutfitBuilderPage() {
         }
     };
 
+    const handleGenerateImage = async () => {
+        if (!currentOutfit) return;
+        if ((currentOutfit.products || []).length === 0) {
+            showToast('Add at least one product to generate a preview', 'error');
+            return;
+        }
+        setGeneratingImage(true);
+        try {
+            const formData = new FormData();
+            formData.append('outfit_id', currentOutfit.outfit_id);
+            const res = await fetch('http://localhost:8000/api/ai/generate-outfit-image', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                body: formData,
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Generation failed');
+            }
+            const data = await res.json();
+            setGeneratedImageUrl(data.image_url);
+            setGeneratedForOutfitId(currentOutfit.outfit_id);
+            showToast('AI preview generated! 🎨', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to generate preview', 'error');
+        } finally {
+            setGeneratingImage(false);
+        }
+    };
+
     if (!user) {
         return (
             <div style={{ minHeight: '100vh', background: 'var(--clr-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--sp-6)' }}>
@@ -609,15 +642,35 @@ export default function OutfitBuilderPage() {
                                         <h2 style={{ fontSize: '18px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-1)' }}>{currentOutfit.name}</h2>
                                         <p style={{ fontSize: '13px', color: 'var(--clr-text-2)' }}>Slot-based outfit workspace</p>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveOutfit}
-                                        disabled={savingOutfit}
-                                        className="btn btn-primary btn-sm"
-                                    >
-                                        <Save size={14} />
-                                        {savingOutfit ? 'Saving...' : 'Save'}
-                                    </button>
+                                    <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center' }}>
+                                        <button
+                                            type="button"
+                                            onClick={handleSaveOutfit}
+                                            disabled={savingOutfit}
+                                            className="btn btn-primary btn-sm"
+                                        >
+                                            <Save size={14} />
+                                            {savingOutfit ? 'Saving...' : 'Save'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleGenerateImage}
+                                            disabled={generatingImage}
+                                            className="btn btn-sm"
+                                            style={{
+                                                background: 'linear-gradient(135deg, #7c3aed, #c026d3)',
+                                                color: '#fff',
+                                                border: 'none',
+                                                opacity: generatingImage ? 0.7 : 1,
+                                            }}
+                                            title="Generate AI outfit preview"
+                                        >
+                                            {generatingImage
+                                                ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                                                : <Sparkles size={14} />}
+                                            {generatingImage ? 'Generating…' : 'AI Preview'}
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div style={{ display: 'grid', gap: 'var(--sp-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
@@ -764,6 +817,55 @@ export default function OutfitBuilderPage() {
                                 </div>
                             </div>
                         </section>
+                    </div>
+                )}
+
+                {/* AI Generated Preview Panel */}
+                {generatedImageUrl && generatedForOutfitId === currentOutfit?.outfit_id && (
+                    <div style={{
+                        background: 'linear-gradient(135deg, rgba(124,58,237,0.08), rgba(192,38,211,0.06))',
+                        border: '1px solid rgba(124,58,237,0.3)',
+                        borderRadius: 'var(--r-2xl)',
+                        padding: 'var(--sp-6)',
+                        marginTop: '24px',
+                        boxShadow: '0 0 32px rgba(124,58,237,0.12)',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                                <Sparkles size={18} style={{ color: 'var(--clr-primary)' }} />
+                                <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--clr-text)' }}>AI Outfit Preview</h3>
+                                <span style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginLeft: '4px' }}>Stored on Cloudinary</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+                                <button
+                                    type="button"
+                                    onClick={handleGenerateImage}
+                                    disabled={generatingImage}
+                                    className="btn btn-sm btn-ghost"
+                                    style={{ fontSize: '12px' }}
+                                >
+                                    <RefreshCw size={13} />
+                                    Regenerate
+                                </button>
+                                <a
+                                    href={generatedImageUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="btn btn-sm btn-ghost"
+                                    style={{ fontSize: '12px' }}
+                                >
+                                    <Download size={13} />
+                                    Open Full
+                                </a>
+                            </div>
+                        </div>
+                        <div style={{ borderRadius: 'var(--r-xl)', overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)' }}>
+                            <img
+                                src={generatedImageUrl}
+                                alt="AI generated outfit preview"
+                                style={{ width: '100%', maxHeight: '480px', objectFit: 'contain', background: '#12121a', display: 'block' }}
+                            />
+                        </div>
                     </div>
                 )}
             </div>

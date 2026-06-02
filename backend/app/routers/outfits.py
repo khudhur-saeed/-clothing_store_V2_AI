@@ -52,6 +52,7 @@ def serialize_outfit(db: Session, outfit: Outfit, include_creator: bool = False)
         "created_at": outfit.created_at,
         "updated_at": outfit.updated_at,
         "likes": 0,
+        "generated_image_url": outfit.generated_image_url or None,
     }
 
     if include_creator:

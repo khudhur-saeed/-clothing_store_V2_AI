@@ -13,6 +13,7 @@ class Outfit(Base):
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)  # Category context
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    generated_image_url = Column(Text, nullable=True)  # Cloudinary URL for AI-generated outfit preview
 
 
 class OutfitProduct(Base):

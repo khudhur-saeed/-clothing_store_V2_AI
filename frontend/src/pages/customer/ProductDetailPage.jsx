@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, Heart, Star, ChevronRight, Check, Minus, Plus } from 'lucide-react';
+import { ShoppingBag, Heart, Star, ChevronRight, Check, Minus, Plus, Sparkles, Upload, RefreshCw, X, Download } from 'lucide-react';
 import { useProduct, useReviews, submitReview } from '../../api/products';
 import { apiCall } from '../../api/client';
 import { useCart } from '../../context/CartContext';
@@ -109,6 +109,14 @@ export default function ProductDetailPage() {
     const [reviewRating, setReviewRating] = useState(0);
     const [related, setRelated] = useState([]);
 
+    // Virtual Try-On state
+    const [tryOnPhoto, setTryOnPhoto] = useState(null);       // File object
+    const [tryOnPreview, setTryOnPreview] = useState(null);   // local blob URL
+    const [tryOnResult, setTryOnResult] = useState(null);     // Cloudinary URL
+    const [tryOnLoading, setTryOnLoading] = useState(false);
+    const [tryOnError, setTryOnError] = useState(null);
+    const fileInputRef = useRef(null);
+
     // Fetch related products whenever the loaded product changes
     // MUST be before any early returns (React rules of hooks)
     useEffect(() => {
@@ -211,6 +219,43 @@ export default function ProductDetailPage() {
             showToast('Review submitted! Thank you.');
         } catch (err) {
             showToast(err.message, 'error');
+        }
+    };
+
+    const handleTryOnPhotoChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setTryOnPhoto(file);
+        setTryOnPreview(URL.createObjectURL(file));
+        setTryOnResult(null);
+        setTryOnError(null);
+    };
+
+    const handleVirtualTryOn = async () => {
+        if (!tryOnPhoto) { showToast('Please upload your photo first', 'error'); return; }
+        if (!user) { showToast('Please sign in to use Virtual Try-On', 'error'); return; }
+        setTryOnLoading(true);
+        setTryOnError(null);
+        try {
+            const formData = new FormData();
+            formData.append('product_id', product.product_id);
+            formData.append('user_photo', tryOnPhoto);
+            const res = await fetch('http://localhost:8000/api/ai/virtual-try-on', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                body: formData,
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Try-on failed');
+            }
+            const data = await res.json();
+            setTryOnResult(data.image_url);
+            showToast('Virtual try-on complete! ✨', 'success');
+        } catch (err) {
+            setTryOnError(err.message || 'Try-on failed. Please try again.');
+        } finally {
+            setTryOnLoading(false);
         }
     };
 
@@ -335,6 +380,116 @@ export default function ProductDetailPage() {
                                 : activeVariant?.stock > 0
                                     ? <><Check size={15} color="var(--clr-success)" /> In Stock — Ships in 2-4 days</>
                                     : 'Currently out of stock'}
+                        </div>
+
+                        {/* ── Virtual Try-On ── */}
+                        <div style={{
+                            marginTop: '28px',
+                            padding: '20px',
+                            background: 'linear-gradient(135deg, rgba(124,58,237,0.07), rgba(192,38,211,0.05))',
+                            border: '1px solid rgba(124,58,237,0.25)',
+                            borderRadius: '16px',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                <Sparkles size={16} style={{ color: '#a855f7' }} />
+                                <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--clr-text)' }}>Virtual Try-On</span>
+                                <span style={{ fontSize: '11px', color: 'var(--clr-text-3)', background: 'rgba(168,85,247,0.15)', padding: '2px 8px', borderRadius: '999px' }}>AI Powered</span>
+                            </div>
+                            <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', marginBottom: '14px', lineHeight: 1.6 }}>
+                                Upload your photo and see how this item looks on you before buying.
+                            </p>
+
+                            {/* Upload area */}
+                            <div
+                                style={{
+                                    border: '2px dashed rgba(124,58,237,0.4)',
+                                    borderRadius: '12px',
+                                    padding: tryOnPreview ? '0' : '24px',
+                                    textAlign: 'center',
+                                    cursor: 'pointer',
+                                    overflow: 'hidden',
+                                    transition: 'border-color 0.2s',
+                                    position: 'relative',
+                                }}
+                                onClick={() => fileInputRef.current?.click()}
+                                onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.7)'}
+                                onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'}
+                            >
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    style={{ display: 'none' }}
+                                    onChange={handleTryOnPhotoChange}
+                                    id="tryon-photo-input"
+                                />
+                                {tryOnPreview ? (
+                                    <div style={{ position: 'relative' }}>
+                                        <img src={tryOnPreview} alt="Your photo" style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' }} />
+                                        <button
+                                            type="button"
+                                            onClick={e => { e.stopPropagation(); setTryOnPhoto(null); setTryOnPreview(null); setTryOnResult(null); }}
+                                            style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <Upload size={24} style={{ color: '#a855f7', margin: '0 auto 8px' }} />
+                                        <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', margin: 0 }}>Click to upload your photo</p>
+                                        <p style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginTop: 4 }}>JPG, PNG — max 10 MB</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                type="button"
+                                id="tryon-generate-btn"
+                                onClick={handleVirtualTryOn}
+                                disabled={!tryOnPhoto || tryOnLoading || !user}
+                                style={{
+                                    marginTop: '12px',
+                                    width: '100%',
+                                    padding: '11px',
+                                    background: tryOnLoading ? 'rgba(124,58,237,0.5)' : 'linear-gradient(135deg,#7c3aed,#c026d3)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '10px',
+                                    fontWeight: 700,
+                                    fontSize: '14px',
+                                    cursor: (!tryOnPhoto || tryOnLoading || !user) ? 'not-allowed' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    transition: 'opacity 0.2s',
+                                }}
+                            >
+                                {tryOnLoading
+                                    ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Generating try-on…</>
+                                    : <><Sparkles size={16} /> {user ? 'Try It On' : 'Sign in to Try On'}</>}
+                            </button>
+
+                            {tryOnError && (
+                                <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--clr-error)', textAlign: 'center' }}>{tryOnError}</p>
+                            )}
+
+                            {/* Try-On Result */}
+                            {tryOnResult && (
+                                <div style={{ marginTop: '16px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--clr-text)' }}>✨ Your Virtual Try-On</span>
+                                        <a href={tryOnResult} target="_blank" rel="noopener noreferrer"
+                                            style={{ fontSize: '12px', color: '#a855f7', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
+                                            <Download size={13} /> Save
+                                        </a>
+                                    </div>
+                                    <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)' }}>
+                                        <img src={tryOnResult} alt="Virtual try-on result" style={{ width: '100%', display: 'block' }} />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

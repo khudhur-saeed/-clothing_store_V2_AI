@@ -75,9 +75,26 @@ export default function AdminOrdersPage() {
                                             className={`badge badge-${statusColors[o.status] || 'muted'}`}
                                             value={o.status || 'processing'}
                                             onChange={e => updateStatus(o.orderid, e.target.value)}
-                                            style={{ background: 'transparent', border: 'none', cursor: 'pointer', outline: 'none', color: 'inherit', fontWeight: 600, fontSize: 11 }}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                outline: 'none',
+                                                color: 'inherit',
+                                                fontWeight: 600,
+                                                fontSize: 11,
+                                                colorScheme: 'dark',
+                                            }}
                                         >
-                                            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                                            {STATUS_OPTIONS.map(s => (
+                                                <option
+                                                    key={s}
+                                                    value={s}
+                                                    style={{ background: '#1f1f38', color: '#f0eeff', fontWeight: 500 }}
+                                                >
+                                                    {s.replace(/_/g, ' ')}
+                                                </option>
+                                            ))}
                                         </select>
                                     </td>
                                     <td>
