@@ -12,6 +12,7 @@ const normalizeOutfit = (outfit) => ({
     createdAt: outfit.createdAt || outfit.created_at,
     creator: outfit.creator || null,
     likes: typeof outfit.likes === 'number' ? outfit.likes : 0,
+    generated_image_url: outfit.generated_image_url || null,
 });
 
 export async function fetchOutfitsByType(type) {

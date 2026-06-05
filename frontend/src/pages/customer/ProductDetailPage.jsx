@@ -7,6 +7,7 @@ import { useCart } from '../../context/CartContext';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import ProductCard from '../../components/ui/ProductCard';
+import { isTryOnEligible } from '../../utils/tryOnCategories';
 
 function StarRating({ rating, interactive, onRate }) {
     const [hover, setHover] = useState(0);
@@ -382,115 +383,117 @@ export default function ProductDetailPage() {
                                     : 'Currently out of stock'}
                         </div>
 
-                        {/* ── Virtual Try-On ── */}
-                        <div style={{
-                            marginTop: '28px',
-                            padding: '20px',
-                            background: 'linear-gradient(135deg, rgba(124,58,237,0.07), rgba(192,38,211,0.05))',
-                            border: '1px solid rgba(124,58,237,0.25)',
-                            borderRadius: '16px',
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                                <Sparkles size={16} style={{ color: '#a855f7' }} />
-                                <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--clr-text)' }}>Virtual Try-On</span>
-                                <span style={{ fontSize: '11px', color: 'var(--clr-text-3)', background: 'rgba(168,85,247,0.15)', padding: '2px 8px', borderRadius: '999px' }}>AI Powered</span>
-                            </div>
-                            <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', marginBottom: '14px', lineHeight: 1.6 }}>
-                                Upload your photo and see how this item looks on you before buying.
-                            </p>
+                        {/* ── Virtual Try-On (only for eligible categories) ── */}
+                        {isTryOnEligible(product.category, product.piece_type || product.outfit_slot) && (
+                            <div style={{
+                                marginTop: '28px',
+                                padding: '20px',
+                                background: 'linear-gradient(135deg, rgba(124,58,237,0.07), rgba(192,38,211,0.05))',
+                                border: '1px solid rgba(124,58,237,0.25)',
+                                borderRadius: '16px',
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                    <Sparkles size={16} style={{ color: '#a855f7' }} />
+                                    <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--clr-text)' }}>Virtual Try-On</span>
+                                    <span style={{ fontSize: '11px', color: 'var(--clr-text-3)', background: 'rgba(168,85,247,0.15)', padding: '2px 8px', borderRadius: '999px' }}>AI Powered</span>
+                                </div>
+                                <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', marginBottom: '14px', lineHeight: 1.6 }}>
+                                    Upload your photo and see how this item looks on you before buying.
+                                </p>
 
-                            {/* Upload area */}
-                            <div
-                                style={{
-                                    border: '2px dashed rgba(124,58,237,0.4)',
-                                    borderRadius: '12px',
-                                    padding: tryOnPreview ? '0' : '24px',
-                                    textAlign: 'center',
-                                    cursor: 'pointer',
-                                    overflow: 'hidden',
-                                    transition: 'border-color 0.2s',
-                                    position: 'relative',
-                                }}
-                                onClick={() => fileInputRef.current?.click()}
-                                onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.7)'}
-                                onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'}
-                            >
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept="image/*"
-                                    style={{ display: 'none' }}
-                                    onChange={handleTryOnPhotoChange}
-                                    id="tryon-photo-input"
-                                />
-                                {tryOnPreview ? (
-                                    <div style={{ position: 'relative' }}>
-                                        <img src={tryOnPreview} alt="Your photo" style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' }} />
-                                        <button
-                                            type="button"
-                                            onClick={e => { e.stopPropagation(); setTryOnPhoto(null); setTryOnPreview(null); setTryOnResult(null); }}
-                                            style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}
-                                        >
-                                            <X size={14} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div>
-                                        <Upload size={24} style={{ color: '#a855f7', margin: '0 auto 8px' }} />
-                                        <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', margin: 0 }}>Click to upload your photo</p>
-                                        <p style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginTop: 4 }}>JPG, PNG — max 10 MB</p>
+                                {/* Upload area */}
+                                <div
+                                    style={{
+                                        border: '2px dashed rgba(124,58,237,0.4)',
+                                        borderRadius: '12px',
+                                        padding: tryOnPreview ? '0' : '24px',
+                                        textAlign: 'center',
+                                        cursor: 'pointer',
+                                        overflow: 'hidden',
+                                        transition: 'border-color 0.2s',
+                                        position: 'relative',
+                                    }}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.7)'}
+                                    onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.4)'}
+                                >
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        style={{ display: 'none' }}
+                                        onChange={handleTryOnPhotoChange}
+                                        id="tryon-photo-input"
+                                    />
+                                    {tryOnPreview ? (
+                                        <div style={{ position: 'relative' }}>
+                                            <img src={tryOnPreview} alt="Your photo" style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' }} />
+                                            <button
+                                                type="button"
+                                                onClick={e => { e.stopPropagation(); setTryOnPhoto(null); setTryOnPreview(null); setTryOnResult(null); }}
+                                                style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}
+                                            >
+                                                <X size={14} />
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <Upload size={24} style={{ color: '#a855f7', margin: '0 auto 8px' }} />
+                                            <p style={{ fontSize: '13px', color: 'var(--clr-text-2)', margin: 0 }}>Click to upload your photo</p>
+                                            <p style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginTop: 4 }}>JPG, PNG — max 10 MB</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <button
+                                    type="button"
+                                    id="tryon-generate-btn"
+                                    onClick={handleVirtualTryOn}
+                                    disabled={!tryOnPhoto || tryOnLoading || !user}
+                                    style={{
+                                        marginTop: '12px',
+                                        width: '100%',
+                                        padding: '11px',
+                                        background: tryOnLoading ? 'rgba(124,58,237,0.5)' : 'linear-gradient(135deg,#7c3aed,#c026d3)',
+                                        color: '#fff',
+                                        border: 'none',
+                                        borderRadius: '10px',
+                                        fontWeight: 700,
+                                        fontSize: '14px',
+                                        cursor: (!tryOnPhoto || tryOnLoading || !user) ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '8px',
+                                        transition: 'opacity 0.2s',
+                                    }}
+                                >
+                                    {tryOnLoading
+                                        ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Generating try-on…</>
+                                        : <><Sparkles size={16} /> {user ? 'Try It On' : 'Sign in to Try On'}</>}
+                                </button>
+
+                                {tryOnError && (
+                                    <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--clr-error)', textAlign: 'center' }}>{tryOnError}</p>
+                                )}
+
+                                {/* Try-On Result */}
+                                {tryOnResult && (
+                                    <div style={{ marginTop: '16px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                            <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--clr-text)' }}>✨ Your Virtual Try-On</span>
+                                            <a href={tryOnResult} target="_blank" rel="noopener noreferrer"
+                                                style={{ fontSize: '12px', color: '#a855f7', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
+                                                <Download size={13} /> Save
+                                            </a>
+                                        </div>
+                                        <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)' }}>
+                                            <img src={tryOnResult} alt="Virtual try-on result" style={{ width: '100%', display: 'block' }} />
+                                        </div>
                                     </div>
                                 )}
                             </div>
-
-                            <button
-                                type="button"
-                                id="tryon-generate-btn"
-                                onClick={handleVirtualTryOn}
-                                disabled={!tryOnPhoto || tryOnLoading || !user}
-                                style={{
-                                    marginTop: '12px',
-                                    width: '100%',
-                                    padding: '11px',
-                                    background: tryOnLoading ? 'rgba(124,58,237,0.5)' : 'linear-gradient(135deg,#7c3aed,#c026d3)',
-                                    color: '#fff',
-                                    border: 'none',
-                                    borderRadius: '10px',
-                                    fontWeight: 700,
-                                    fontSize: '14px',
-                                    cursor: (!tryOnPhoto || tryOnLoading || !user) ? 'not-allowed' : 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '8px',
-                                    transition: 'opacity 0.2s',
-                                }}
-                            >
-                                {tryOnLoading
-                                    ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Generating try-on…</>
-                                    : <><Sparkles size={16} /> {user ? 'Try It On' : 'Sign in to Try On'}</>}
-                            </button>
-
-                            {tryOnError && (
-                                <p style={{ marginTop: '10px', fontSize: '12px', color: 'var(--clr-error)', textAlign: 'center' }}>{tryOnError}</p>
-                            )}
-
-                            {/* Try-On Result */}
-                            {tryOnResult && (
-                                <div style={{ marginTop: '16px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--clr-text)' }}>✨ Your Virtual Try-On</span>
-                                        <a href={tryOnResult} target="_blank" rel="noopener noreferrer"
-                                            style={{ fontSize: '12px', color: '#a855f7', display: 'flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}>
-                                            <Download size={13} /> Save
-                                        </a>
-                                    </div>
-                                    <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(124,58,237,0.2)' }}>
-                                        <img src={tryOnResult} alt="Virtual try-on result" style={{ width: '100%', display: 'block' }} />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        )}
                     </div>
                 </div>
 

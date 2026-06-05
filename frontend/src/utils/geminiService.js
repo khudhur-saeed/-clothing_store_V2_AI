@@ -165,91 +165,58 @@ export async function virtualTryOnDemo(userPhotoFile, productImageUrl, productNa
  * @param {string} productName     - name of the product
  * @returns {string} base64 image data (png)
  */
-export async function virtualTryOn(userPhotoFile, productImageUrl, productName) {
-    if (!API_KEY || API_KEY === 'your_gemini_api_key_here') {
-        throw new Error('GEMINI_API_KEY_MISSING');
+export async function virtualTryOn(userPhotoFile, productImageUrl, productName, productId) {
+    // Route through the backend so the API key stays server-side and we use the correct model
+    const token = localStorage.getItem('moda_token') || sessionStorage.getItem('moda_token');
+    if (!token) {
+        throw new Error('You must be logged in to use the virtual try-on feature.');
     }
 
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    const discoveredModels = await discoverImageModelCandidates();
-    const modelCandidates = [...new Set([
-        ...TRY_ON_MODEL_CANDIDATES.map(normalizeModelName),
-        ...discoveredModels,
-    ])];
+    const formData = new FormData();
+    formData.append('product_id', String(productId));
+    formData.append('user_photo', userPhotoFile);
+    if (productImageUrl) {
+        formData.append('product_image_url', productImageUrl);
+    }
 
-    const userPhotoB64 = await fileToBase64(userPhotoFile);
-    const productImgB64 = await urlToBase64(productImageUrl);
-
-    const prompt = `You are a virtual fashion try-on AI. 
-The first image shows a person. 
-The second image shows a fashion item: "${productName}".
-
-Please generate a photorealistic image showing the SAME person from the first image naturally wearing the "${productName}" from the second image. 
-- Keep the person's face, hair, skin tone, and body shape exactly the same.
-- Naturally place the clothing/accessory item on their body.
-- Maintain good lighting and photo quality.
-- The result should look like a real photo of the person wearing the item.`;
-
-    let result;
-    let lastModelError = null;
-    const quotaErrors = [];
-
-    for (const modelName of modelCandidates) {
-        const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: {
-                responseModalities: ['image', 'text'],
-            },
+    let response;
+    try {
+        response = await fetch('http://localhost:8000/api/ai/virtual-try-on', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: formData,
         });
+    } catch {
+        throw new Error('Could not reach the backend. Make sure the server is running.');
+    }
 
+    if (!response.ok) {
+        let detail = `Server error ${response.status}`;
         try {
-            result = await model.generateContent([
-                { inlineData: { data: userPhotoB64, mimeType: userPhotoFile.type || 'image/jpeg' } },
-                { inlineData: { data: productImgB64, mimeType: 'image/jpeg' } },
-                prompt,
-            ]);
-            break;
-        } catch (err) {
-            const message = String(err?.message || '');
-            if (message === 'Failed to fetch') {
-                throw new Error('Failed to reach Gemini API. Check internet connection, API key restrictions, and ad-blockers/CORS settings.');
-            }
-            if (isModelNotFoundError(err)) {
-                lastModelError = err;
-                continue;
-            }
-            if (isQuotaOrRateLimitError(err)) {
-                quotaErrors.push(err);
-                continue;
-            }
-            throw err;
+            const err = await response.json();
+            detail = err?.detail || detail;
+        } catch { /* ignore parse error */ }
+
+        if (response.status === 401 || response.status === 403) {
+            throw new Error('Session expired. Please log in again.');
         }
+        if (response.status === 429) {
+            throw new Error('GEMINI_QUOTA_EXCEEDED: API quota reached. Please wait a moment and try again.');
+        }
+        throw new Error(detail);
     }
 
-    if (!result) {
-        if (quotaErrors.length > 0) {
-            const retrySeconds = extractRetrySeconds(quotaErrors[0]);
-            const retryHint = retrySeconds ? ` Try again in about ${retrySeconds} seconds.` : '';
-            throw new Error(
-                `GEMINI_QUOTA_EXCEEDED: Your Gemini API quota/rate limit was reached.${retryHint} ` +
-                `If this persists, enable billing or use another API key/project.`
-            );
-        }
-
-        throw new Error(
-            `No compatible Gemini image model found for this key/project. Tried: ${modelCandidates.join(', ')}. ` +
-            `Set VITE_GEMINI_TRYON_MODEL in frontend/.env to a model from Gemini ListModels.`
-        );
+    const data = await response.json();
+    const imageUrl = data?.image_url;
+    if (!imageUrl) {
+        throw new Error('No image URL returned from the server.');
     }
 
-    // Extract the image part from the response
-    for (const part of result.response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            return part.inlineData.data; // base64 PNG
-        }
-    }
-
-    throw new Error('No image returned by Gemini. Try a clearer photo.');
+    // Fetch the generated image and convert to base64 so the modal can display it
+    const imgResp = await fetch(imageUrl);
+    if (!imgResp.ok) throw new Error('Could not load the generated image.');
+    const blob = await imgResp.blob();
+    return fileToBase64(blob);
 }
 
 /**

@@ -49,12 +49,30 @@ export default function OutfitBuilderPage() {
     const [outfitCategoryMap, setOutfitCategoryMap] = useState({});
     const [activeSlot, setActiveSlot] = useState(null);
 
+    // When the user switches to a different outfit, clear the generated preview
+    // so the old image doesn't persist on a new/different outfit.
+    const handleSelectOutfit = (outfitId) => {
+        if (outfitId !== selectedOutfitId) {
+            setGeneratedImageUrl(null);
+            setGeneratedForOutfitId(null);
+        }
+        setSelectedOutfitId(outfitId);
+    };
+
     const [filteredProducts, setFilteredProducts] = useState([]);
     const [loadingPicker, setLoadingPicker] = useState(false);
     const [savingOutfit, setSavingOutfit] = useState(false);
     const [generatingImage, setGeneratingImage] = useState(false);
     const [generatedImageUrl, setGeneratedImageUrl] = useState(null);
     const [generatedForOutfitId, setGeneratedForOutfitId] = useState(null);
+
+    // Publish flow state
+    const [showPublishModal, setShowPublishModal] = useState(false);
+    const [publishImageUrl, setPublishImageUrl] = useState(null);
+    const [publishAttempts, setPublishAttempts] = useState(0);
+    const [publishingImage, setPublishingImage] = useState(false);
+    const [publishingSave, setPublishingSave] = useState(false);
+    const MAX_PUBLISH_ATTEMPTS = 3;
 
     const currentOutfit = useMemo(
         () => outfits.find((outfit) => outfit.outfit_id === selectedOutfitId) || null,
@@ -146,10 +164,17 @@ export default function OutfitBuilderPage() {
     }, [location]);
 
     useEffect(() => {
-        if (!selectedOutfitId && outfits.length > 0) {
+        if (outfits.length === 0) {
+            // All outfits deleted — reset to empty state
+            setSelectedOutfitId(null);
+            return;
+        }
+        const exists = outfits.some((o) => o.outfit_id === selectedOutfitId);
+        if (!exists) {
+            // Selected outfit was deleted — auto-select the first remaining one
             setSelectedOutfitId(outfits[0].outfit_id);
         }
-    }, [outfits, selectedOutfitId]);
+    }, [outfits]);
 
     useEffect(() => {
         if (!currentOutfit) {
@@ -303,7 +328,7 @@ export default function OutfitBuilderPage() {
         }
     };
 
-    const handleCreateOutfit = () => {
+    const handleCreateOutfit = async () => {
         if (!createForm.name.trim()) {
             showToast('Outfit name is required', 'error');
             return;
@@ -315,7 +340,7 @@ export default function OutfitBuilderPage() {
         }
 
         const categoryId = String(createForm.categoryId);
-        const createdOutfit = createOutfit({
+        const createdOutfit = await createOutfit({
             name: createForm.name.trim(),
             description: createForm.description,
             visibility: createForm.visibility,
@@ -331,6 +356,9 @@ export default function OutfitBuilderPage() {
             }));
             setActiveSlot('Tops');
             setFilteredProducts([]);
+            showToast(`Outfit "${createdOutfit.name}" created!`, 'success');
+        } else {
+            showToast('Failed to create outfit. Please try again.', 'error');
         }
 
         setCreateForm({
@@ -341,6 +369,7 @@ export default function OutfitBuilderPage() {
         });
         setShowCreateModal(false);
     };
+
 
     const handleSaveOutfit = async () => {
         if (!currentOutfit) return;
@@ -418,7 +447,7 @@ export default function OutfitBuilderPage() {
             formData.append('outfit_id', currentOutfit.outfit_id);
             const res = await fetch('http://localhost:8000/api/ai/generate-outfit-image', {
                 method: 'POST',
-                headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+                headers: { Authorization: `Bearer ${localStorage.getItem('moda_token')}` },
                 body: formData,
             });
             if (!res.ok) {
@@ -434,6 +463,119 @@ export default function OutfitBuilderPage() {
         } finally {
             setGeneratingImage(false);
         }
+    };
+
+    // -----------------------------------------------------------------------
+    // Publish flow: auto-generate image → show confirmation → publish or retry
+    // -----------------------------------------------------------------------
+    const _generateOutfitImage = async (outfitId) => {
+        const formData = new FormData();
+        formData.append('outfit_id', outfitId);
+        const res = await fetch('http://localhost:8000/api/ai/generate-outfit-image', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${localStorage.getItem('moda_token')}` },
+            body: formData,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Image generation failed');
+        }
+        const data = await res.json();
+        return data.image_url;
+    };
+
+    const handlePublish = async () => {
+        if (!currentOutfit) return;
+        if ((currentOutfit.products || []).length === 0) {
+            showToast('Add at least one product before publishing', 'error');
+            return;
+        }
+
+        // Step 1: Save the outfit first (so it has a real DB id)
+        setSavingOutfit(true);
+        try {
+            const productIds = (currentOutfit.products || []).filter(id => id != null);
+            const payload = {
+                name: currentOutfit.name,
+                description: currentOutfit.description || '',
+                visibility: 'private',   // keep private until user confirms
+                category_id: null,
+                product_ids: productIds,
+            };
+            const outfitId = currentOutfit.outfit_id;
+            if (currentOutfit.isSaved && outfitId) {
+                await apiCall(`/outfits/${outfitId}`, { method: 'PUT' }, payload);
+            } else {
+                await apiCall('/outfits/', { method: 'POST' }, payload);
+            }
+            await refreshOutfits();
+        } catch (err) {
+            showToast(err.message || 'Failed to save outfit', 'error');
+            setSavingOutfit(false);
+            return;
+        } finally {
+            setSavingOutfit(false);
+        }
+
+        // Step 2: Generate the AI image preview
+        setPublishAttempts(1);
+        setPublishImageUrl(null);
+        setPublishingImage(true);
+        setShowPublishModal(true);
+        try {
+            const imageUrl = await _generateOutfitImage(currentOutfit.outfit_id);
+            setPublishImageUrl(imageUrl);
+        } catch (err) {
+            showToast(err.message || 'Image generation failed', 'error');
+            setShowPublishModal(false);
+        } finally {
+            setPublishingImage(false);
+        }
+    };
+
+    const handleRegeneratePublish = async () => {
+        if (publishAttempts >= MAX_PUBLISH_ATTEMPTS) return;
+        setPublishAttempts(prev => prev + 1);
+        setPublishingImage(true);
+        setPublishImageUrl(null);
+        try {
+            const imageUrl = await _generateOutfitImage(currentOutfit.outfit_id);
+            setPublishImageUrl(imageUrl);
+        } catch (err) {
+            showToast(err.message || 'Regeneration failed', 'error');
+        } finally {
+            setPublishingImage(false);
+        }
+    };
+
+    const handleConfirmPublish = async () => {
+        if (!currentOutfit || !publishImageUrl) return;
+        setPublishingSave(true);
+        try {
+            await apiCall(`/outfits/${currentOutfit.outfit_id}`, { method: 'PUT' }, {
+                name: currentOutfit.name,
+                description: currentOutfit.description || '',
+                visibility: 'public',
+                category_id: null,
+                product_ids: (currentOutfit.products || []).filter(id => id != null),
+            });
+            await refreshOutfits();
+            setGeneratedImageUrl(publishImageUrl);
+            setGeneratedForOutfitId(currentOutfit.outfit_id);
+            setShowPublishModal(false);
+            showToast('🎉 Outfit published successfully!', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to publish', 'error');
+        } finally {
+            setPublishingSave(false);
+        }
+    };
+
+    const handleCancelPublish = () => {
+        setShowPublishModal(false);
+        setPublishImageUrl(null);
+        setPublishAttempts(0);
+        showToast('Outfit kept as private', 'info');
     };
 
     if (!user) {
@@ -473,7 +615,12 @@ export default function OutfitBuilderPage() {
                 </div>
 
                 <div style={{ background: 'var(--clr-surface)', border: '1px solid var(--clr-border)', borderRadius: 'var(--r-2xl)', padding: 'var(--sp-6)', boxShadow: 'var(--shadow-sm)', marginBottom: '24px' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-4)' }}>My Outfits</div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>My Outfits</span>
+                        {outfits.length > 0 && (
+                            <span style={{ fontWeight: 400, color: 'var(--clr-text-3)' }}>{outfits.length} outfit{outfits.length !== 1 ? 's' : ''}</span>
+                        )}
+                    </div>
                     {outfits.length === 0 ? (
                         <div style={{ borderRadius: 'var(--r-lg)', border: '2px dashed var(--clr-border-2)', background: 'rgba(255,255,255,0.02)', padding: 'var(--sp-6)', textAlign: 'center' }}>
                             <p style={{ fontSize: '14px', color: 'var(--clr-text-2)', marginBottom: 'var(--sp-4)' }}>No outfits yet. Create your first one.</p>
@@ -492,7 +639,7 @@ export default function OutfitBuilderPage() {
                                 <button
                                     key={outfit.outfit_id}
                                     type="button"
-                                    onClick={() => setSelectedOutfitId(outfit.outfit_id)}
+                                    onClick={() => handleSelectOutfit(outfit.outfit_id)}
                                     style={{
                                         background: 'var(--clr-surface-2)',
                                         border: `1.5px solid ${selectedOutfitId === outfit.outfit_id ? 'var(--clr-primary)' : 'var(--clr-border)'}`,
@@ -647,28 +794,28 @@ export default function OutfitBuilderPage() {
                                             type="button"
                                             onClick={handleSaveOutfit}
                                             disabled={savingOutfit}
-                                            className="btn btn-primary btn-sm"
+                                            className="btn btn-sm"
+                                            style={{ background: 'var(--clr-surface-2)', border: '1.5px solid var(--clr-border)', color: 'var(--clr-text)' }}
                                         >
                                             <Save size={14} />
-                                            {savingOutfit ? 'Saving...' : 'Save'}
+                                            {savingOutfit ? 'Saving...' : 'Save Draft'}
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={handleGenerateImage}
-                                            disabled={generatingImage}
+                                            onClick={handlePublish}
+                                            disabled={savingOutfit || publishingImage}
                                             className="btn btn-sm"
                                             style={{
                                                 background: 'linear-gradient(135deg, #7c3aed, #c026d3)',
                                                 color: '#fff',
                                                 border: 'none',
-                                                opacity: generatingImage ? 0.7 : 1,
+                                                opacity: (savingOutfit || publishingImage) ? 0.7 : 1,
                                             }}
-                                            title="Generate AI outfit preview"
                                         >
-                                            {generatingImage
+                                            {savingOutfit || publishingImage
                                                 ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
                                                 : <Sparkles size={14} />}
-                                            {generatingImage ? 'Generating…' : 'AI Preview'}
+                                            {savingOutfit ? 'Saving...' : publishingImage ? 'Generating...' : 'Publish'}
                                         </button>
                                     </div>
                                 </div>
@@ -1004,6 +1151,160 @@ export default function OutfitBuilderPage() {
                                 Create Outfit
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+            {/* ── Publish Confirmation Modal ── */}
+            {showPublishModal && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 100,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(0,0,0,0.75)',
+                    backdropFilter: 'blur(8px)',
+                    padding: 'var(--sp-4)',
+                }}>
+                    <div style={{
+                        background: 'var(--clr-surface)',
+                        border: '1px solid rgba(124,58,237,0.4)',
+                        borderRadius: 'var(--r-2xl)',
+                        boxShadow: '0 0 60px rgba(124,58,237,0.25)',
+                        maxWidth: '560px',
+                        width: '100%',
+                        overflow: 'hidden',
+                    }}>
+                        {/* Header */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, rgba(124,58,237,0.12), rgba(192,38,211,0.08))',
+                            borderBottom: '1px solid rgba(124,58,237,0.2)',
+                            padding: 'var(--sp-5)',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
+                                <Sparkles size={20} style={{ color: '#a855f7' }} />
+                                <div>
+                                    <div style={{ fontSize: '17px', fontWeight: 700, color: 'var(--clr-text)' }}>AI Outfit Preview</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--clr-text-3)', marginTop: '2px' }}>
+                                        Attempt {publishAttempts} of {MAX_PUBLISH_ATTEMPTS}
+                                    </div>
+                                </div>
+                            </div>
+                            {/* Attempt dots */}
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                                {Array.from({ length: MAX_PUBLISH_ATTEMPTS }).map((_, i) => (
+                                    <div key={i} style={{
+                                        width: 8, height: 8, borderRadius: '50%',
+                                        background: i < publishAttempts ? '#a855f7' : 'var(--clr-border-2)',
+                                        transition: 'background 0.3s',
+                                    }} />
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Image area */}
+                        <div style={{
+                            minHeight: '320px',
+                            background: '#0c0c14',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            position: 'relative',
+                        }}>
+                            {publishingImage ? (
+                                <div style={{ textAlign: 'center', color: 'var(--clr-text-2)' }}>
+                                    <div style={{
+                                        width: 56, height: 56, borderRadius: '50%',
+                                        border: '3px solid rgba(168,85,247,0.2)',
+                                        borderTopColor: '#a855f7',
+                                        animation: 'spin 0.9s linear infinite',
+                                        margin: '0 auto 16px',
+                                    }} />
+                                    <div style={{ fontSize: '14px', fontWeight: 600 }}>Generating AI Preview…</div>
+                                    <div style={{ fontSize: '12px', color: 'var(--clr-text-3)', marginTop: '6px' }}>This may take 20–30 seconds</div>
+                                </div>
+                            ) : publishImageUrl ? (
+                                <img
+                                    src={publishImageUrl}
+                                    alt="AI generated outfit"
+                                    style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block' }}
+                                />
+                            ) : (
+                                <div style={{ color: 'var(--clr-text-3)', fontSize: '14px' }}>No image generated yet</div>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div style={{
+                            padding: 'var(--sp-5)',
+                            borderTop: '1px solid var(--clr-border)',
+                            display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap',
+                        }}>
+                            {/* Keep Private */}
+                            <button
+                                type="button"
+                                onClick={handleCancelPublish}
+                                disabled={publishingImage || publishingSave}
+                                className="btn btn-ghost"
+                                style={{ fontSize: '13px' }}
+                            >
+                                <Lock size={14} />
+                                Keep Private
+                            </button>
+
+                            {/* Regenerate */}
+                            <button
+                                type="button"
+                                onClick={handleRegeneratePublish}
+                                disabled={publishingImage || publishingSave || publishAttempts >= MAX_PUBLISH_ATTEMPTS}
+                                className="btn btn-sm"
+                                style={{
+                                    marginLeft: 'auto',
+                                    background: 'var(--clr-surface-2)',
+                                    border: '1.5px solid var(--clr-border)',
+                                    color: publishAttempts >= MAX_PUBLISH_ATTEMPTS ? 'var(--clr-text-3)' : 'var(--clr-text)',
+                                    fontSize: '13px',
+                                    cursor: publishAttempts >= MAX_PUBLISH_ATTEMPTS ? 'not-allowed' : 'pointer',
+                                }}
+                                title={publishAttempts >= MAX_PUBLISH_ATTEMPTS ? 'Maximum regenerations reached' : `Regenerate (${MAX_PUBLISH_ATTEMPTS - publishAttempts} left)`}
+                            >
+                                <RefreshCw size={14} />
+                                {publishAttempts >= MAX_PUBLISH_ATTEMPTS ? 'No retries left' : `Regenerate (${MAX_PUBLISH_ATTEMPTS - publishAttempts} left)`}
+                            </button>
+
+                            {/* Confirm & Publish */}
+                            <button
+                                type="button"
+                                onClick={handleConfirmPublish}
+                                disabled={publishingImage || publishingSave || !publishImageUrl}
+                                className="btn btn-sm"
+                                style={{
+                                    background: publishImageUrl && !publishingImage && !publishingSave
+                                        ? 'linear-gradient(135deg, #7c3aed, #c026d3)'
+                                        : 'var(--clr-surface-2)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    fontSize: '13px',
+                                    opacity: (publishingImage || publishingSave || !publishImageUrl) ? 0.6 : 1,
+                                }}
+                            >
+                                {publishingSave
+                                    ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                                    : <Eye size={14} />}
+                                {publishingSave ? 'Publishing...' : 'Confirm & Publish'}
+                            </button>
+                        </div>
+
+                        {/* Attempts exhausted notice */}
+                        {publishAttempts >= MAX_PUBLISH_ATTEMPTS && !publishingImage && (
+                            <div style={{
+                                background: 'rgba(251,191,36,0.08)',
+                                borderTop: '1px solid rgba(251,191,36,0.2)',
+                                padding: 'var(--sp-3) var(--sp-5)',
+                                fontSize: '12px',
+                                color: '#f59e0b',
+                                display: 'flex', alignItems: 'center', gap: '8px',
+                            }}>
+                                <span>⚠️</span>
+                                <span>You've used all {MAX_PUBLISH_ATTEMPTS} generation attempts. Confirm the current image or keep the outfit private.</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

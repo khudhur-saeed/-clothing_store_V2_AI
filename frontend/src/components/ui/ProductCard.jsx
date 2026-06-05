@@ -4,6 +4,7 @@ import { Heart, StarIcon, ShoppingBag, Sparkles } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useCart } from '../../context/CartContext';
 import TryOnModal from './TryOnModal';
+import { isTryOnEligible } from '../../utils/tryOnCategories';
 
 function StarRating({ rating, count }) {
     return (
@@ -25,6 +26,7 @@ export default function ProductCard({ product }) {
 
     const fav = isFavorite(product.id);
     const primaryVariant = product.variants[0];
+    const tryOnEnabled = isTryOnEligible(product.category, product.piece_type || product.outfit_slot);
     const primaryImage = product.images.find(i => i.is_primary)?.url || product.images[0]?.url;
     const displayPrice = Number(primaryVariant?.price ?? product.price ?? 0).toFixed(2);
 
@@ -68,13 +70,15 @@ export default function ProductCard({ product }) {
                             id={`add-to-cart-${product.id}`}>
                             <ShoppingBag size={14} /> Add to Cart
                         </button>
-                        <button
-                            className="tryon-card-btn"
-                            onClick={handleTryOn}
-                            id={`try-on-${product.id}`}
-                            title="Virtual Try-On with AI">
-                            <Sparkles size={13} /> Try On
-                        </button>
+                        {tryOnEnabled && (
+                            <button
+                                className="tryon-card-btn"
+                                onClick={handleTryOn}
+                                id={`try-on-${product.id}`}
+                                title="Virtual Try-On with AI">
+                                <Sparkles size={13} /> Try On
+                            </button>
+                        )}
                     </div>
 
                     <div className="product-card__badge">
@@ -97,14 +101,16 @@ export default function ProductCard({ product }) {
                     <StarRating rating={product.rating} count={product.review_count} />
                     <div className="flex items-center justify-between" style={{ marginTop: 8 }}>
                         <span className="product-card__price">${displayPrice}</span>
-                        {/* Mini Try-On button always visible below price */}
-                        <button
-                            className="tryon-mini-btn"
-                            onClick={handleTryOn}
-                            id={`try-on-mini-${product.id}`}
-                            title="Try on with AI">
-                            <Sparkles size={11} /> Try On
-                        </button>
+                        {/* Mini Try-On button — only for eligible categories */}
+                        {tryOnEnabled && (
+                            <button
+                                className="tryon-mini-btn"
+                                onClick={handleTryOn}
+                                id={`try-on-mini-${product.id}`}
+                                title="Try on with AI">
+                                <Sparkles size={11} /> Try On
+                            </button>
+                        )}
                     </div>
                 </div>
             </Link>

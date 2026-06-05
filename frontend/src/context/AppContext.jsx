@@ -207,20 +207,45 @@ export function AppProvider({ children }) {
         }
     };
 
-    // --- Outfits (local) ---
-    const createOutfit = (outfit) => {
-        const createdOutfit = {
-            ...outfit,
-            outfit_id: Date.now(),
-            user_id: 1, 
-            products: [],
-            slotMap: {},
-            createdAt: new Date().toISOString(),
-            isSaved: false  // Mark as not yet saved to database
-        };
-        setOutfits(prev => [...prev, createdOutfit]);
-        return createdOutfit;
+    // --- Outfits ---
+    const createOutfit = async (outfit) => {
+        const token = localStorage.getItem('moda_token');
+        try {
+            const payload = {
+                name: (outfit.name || 'My Outfit').trim(),
+                description: outfit.description || '',
+                visibility: outfit.visibility || 'private',
+                category_id: null,
+                product_ids: [],
+                department: outfit.department || null,
+            };
+            const saved = token
+                ? await apiCall('/outfits/', { method: 'POST' }, payload)
+                : null;
+
+            const newOutfit = saved
+                ? normalizePersistedOutfit(saved)
+                : {
+                    outfit_id: Date.now(),
+                    user_id: 1,
+                    name: payload.name,
+                    description: payload.description,
+                    visibility: payload.visibility,
+                    department: payload.department,
+                    products: [],
+                    slotMap: {},
+                    created_at: new Date().toISOString(),
+                    isSaved: false,
+                  };
+
+            setOutfits(prev => [...prev, newOutfit]);
+            return newOutfit;
+        } catch (err) {
+            console.error('Failed to create outfit:', err.message);
+            return null;
+        }
     };
+
 
     const addToOutfit = (outfitId, productId, pieceType = null, replaceProductId = null) => {
         setOutfits(prev => prev.map(o => {
@@ -229,16 +254,28 @@ export function AppProvider({ children }) {
             let nextProducts = [...o.products];
             const nextSlotMap = { ...(o.slotMap || {}) };
 
+            // Remove the product being explicitly replaced (slot swap)
             if (replaceProductId && replaceProductId !== productId) {
                 nextProducts = nextProducts.filter(id => id !== replaceProductId);
+                // Also clear from slotMap if it was mapped there
+                for (const [slot, id] of Object.entries(nextSlotMap)) {
+                    if (id === replaceProductId) delete nextSlotMap[slot];
+                }
             }
 
+            // If a pieceType is provided and the slot already has a different product, replace it
             if (pieceType && nextSlotMap[pieceType] && nextSlotMap[pieceType] !== productId) {
                 nextProducts = nextProducts.filter(id => id !== nextSlotMap[pieceType]);
+                delete nextSlotMap[pieceType];
             }
 
-            if (nextProducts.includes(productId)) {
-                showToast('This item is already in your outfit', 'error');
+            // Already in this exact slot — no-op
+            if (pieceType && nextSlotMap[pieceType] === productId) {
+                return o;
+            }
+
+            // Avoid exact duplicate (same product, same slot or no slot)
+            if (!pieceType && nextProducts.includes(productId)) {
                 return o;
             }
 

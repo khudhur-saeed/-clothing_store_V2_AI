@@ -8,6 +8,8 @@ export default function TryOnModal({ product, onClose }) {
     const [result, setResult] = useState(null);      // base64 from Gemini
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    // validationError: non-empty string when photo validation fails (no human / wrong body region)
+    const [validationError, setValidationError] = useState('');
     const [dragOver, setDragOver] = useState(false);
     const fileInputRef = useRef(null);
 
@@ -23,6 +25,7 @@ export default function TryOnModal({ product, onClose }) {
             return;
         }
         setError('');
+        setValidationError('');
         setResult(null);
         setUserPhoto(file);
         const reader = new FileReader();
@@ -37,23 +40,29 @@ export default function TryOnModal({ product, onClose }) {
 
     const handleTryOn = async () => {
         if (!userPhoto) { setError('Please upload your photo first.'); return; }
-        setLoading(true); setError(''); setResult(null);
+        setLoading(true); setError(''); setValidationError(''); setResult(null);
         try {
-            const base64 = await virtualTryOn(userPhoto, productImg, product.name);
+            const base64 = await virtualTryOn(userPhoto, productImg, product.name, product.product_id);
             setResult(base64);
         } catch (err) {
-            if (err.message === 'GEMINI_API_KEY_MISSING') {
-                setError('⚠️ Gemini API key not set. Add your key to the .env file (VITE_GEMINI_API_KEY).');
-            } else if (err.message?.startsWith('GEMINI_QUOTA_EXCEEDED:')) {
+            const msg = err.message || '';
+            if (msg.startsWith('GEMINI_QUOTA_EXCEEDED:')) {
                 try {
                     const demoBase64 = await virtualTryOnDemo(userPhoto, productImg, product.name);
                     setResult(demoBase64);
-                    setError('⚠️ Gemini quota exceeded. Showing a local demo preview instead.');
+                    setError('⚠️ AI quota exceeded. Showing a demo preview instead.');
                 } catch {
-                    setError('⚠️ Gemini quota exceeded for this API key. Wait a minute and retry, or switch to a billed/another key.');
+                    setError('⚠️ AI quota exceeded. Please wait a moment and try again.');
                 }
+            } else if (
+                msg.toLowerCase().includes('no human body detected') ||
+                msg.toLowerCase().includes('requires your') ||
+                msg.toLowerCase().includes('required body area')
+            ) {
+                // Photo validation rejection — show specific backend message in amber banner
+                setValidationError(msg);
             } else {
-                setError(`AI error: ${err.message}`);
+                setError(`❌ ${msg}`);
             }
         } finally {
             setLoading(false);
@@ -169,7 +178,27 @@ export default function TryOnModal({ product, onClose }) {
                         <div className="text-primary font-bold">${product.variants[0]?.price.toFixed(2)}</div>
                     </div>
 
-                    {/* Error */}
+                    {/* Photo validation rejection (no human / wrong body region) */}
+                    {validationError && (
+                        <div className="tryon-no-human-banner animate-slideUp">
+                            <span style={{ fontSize: 20 }}>🚫</span>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
+                                    {validationError.toLowerCase().includes('no human')
+                                        ? 'No person detected in your photo'
+                                        : 'Wrong photo for this product'}
+                                </div>
+                                <div style={{ fontSize: 12, opacity: 0.85 }}>{validationError}</div>
+                            </div>
+                            <button
+                                className="btn btn-outline btn-sm"
+                                style={{ flexShrink: 0, fontSize: 11 }}
+                                onClick={() => { setPreview(null); setUserPhoto(null); setValidationError(''); }}
+                            >Change Photo</button>
+                        </div>
+                    )}
+
+                    {/* Generic error */}
                     {error && (
                         <div className="alert alert-error animate-slideUp">
                             <AlertCircle size={15} />
@@ -229,6 +258,7 @@ export default function TryOnModal({ product, onClose }) {
         @keyframes spin { to { transform: rotate(360deg); } }
         .tryon-product-info { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-4); background: var(--clr-bg-3); border-radius: var(--r-lg); }
         .tryon-footer { display: flex; gap: var(--sp-3); }
+        .tryon-no-human-banner { display: flex; align-items: center; gap: var(--sp-3); background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.35); border-radius: var(--r-md); padding: var(--sp-4); color: var(--clr-text-2); }
         @media (max-width: 600px) { .tryon-panels { grid-template-columns: 1fr; } .tryon-arrow { flex-direction: row; } }
       `}</style>
         </div>

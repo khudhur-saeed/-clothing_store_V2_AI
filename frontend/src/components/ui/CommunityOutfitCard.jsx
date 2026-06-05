@@ -24,6 +24,7 @@ export default function CommunityOutfitCard({
     isBusy = false,
 }) {
     const [detailsOpen, setDetailsOpen] = useState(false);
+    const [lightboxOpen, setLightboxOpen] = useState(false);
     const isMyOutfit = mode === 'my';
     const visibilityPublic = outfit.isPublic || outfit.visibility === 'public';
 
@@ -53,88 +54,105 @@ export default function CommunityOutfitCard({
                 height: '100%',
                 minHeight: 420,
             }}>
+                {/* ── Card Image Area ── */}
                 <div style={{
                     position: 'relative',
-                    padding: 'var(--sp-3)',
-                    background: 'linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))',
-                }}>
+                    aspectRatio: outfit.generated_image_url ? '3 / 4' : '4 / 3',
+                    background: outfit.generated_image_url
+                        ? 'linear-gradient(145deg, #f8f8fa, #ececf1)'
+                        : 'linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02))',
+                    overflow: 'hidden',
+                    cursor: outfit.generated_image_url ? 'zoom-in' : 'default',
+                }}
+                    onClick={() => outfit.generated_image_url && setLightboxOpen(true)}
+                >
+                    {outfit.generated_image_url ? (
+                        /* AI-generated mannequin image — full portrait, nothing cropped */
+                        <img
+                            src={outfit.generated_image_url}
+                            alt={`AI outfit preview for ${outfit.name}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                        />
+                    ) : (
+                        /* Fallback: 2×2 product grid */
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gridTemplateRows: '1fr 1fr',
+                            gap: 'var(--sp-2)',
+                            padding: 'var(--sp-3)',
+                            height: '100%',
+                            boxSizing: 'border-box',
+                        }}>
+                            {[0, 1, 2, 3].map((idx) => {
+                                const data = previewItems[idx];
+                                const image = getProductImage(data?.product);
+                                return (
+                                    <div key={idx} style={{
+                                        borderRadius: 'var(--r-md)',
+                                        overflow: 'hidden',
+                                        background: 'var(--clr-surface-2)',
+                                        position: 'relative',
+                                        border: '1px solid var(--glass-border)',
+                                    }}>
+                                        {image ? (
+                                            <img
+                                                src={image}
+                                                alt={data?.product?.name || `Outfit item ${idx + 1}`}
+                                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                            />
+                                        ) : (
+                                            <div style={{
+                                                width: '100%', height: '100%',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                color: 'var(--clr-text-3)', fontSize: 11, fontWeight: 600,
+                                            }}>
+                                                {data ? 'No Image' : 'Empty'}
+                                            </div>
+                                        )}
+                                        {idx === 3 && itemIds.length > 4 && (
+                                            <div style={{
+                                                position: 'absolute', inset: 0,
+                                                background: 'rgba(0,0,0,0.42)',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                color: '#fff', fontWeight: 700, fontSize: 16, letterSpacing: '0.04em',
+                                            }}>
+                                                +{itemIds.length - 4}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {/* Public / Private badge — top left */}
                     <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gridTemplateRows: '1fr 1fr',
-                        gap: 'var(--sp-2)',
-                        aspectRatio: '4 / 3',
+                        position: 'absolute', top: 'var(--sp-3)', left: 'var(--sp-3)',
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        fontSize: 11, fontWeight: 700, color: '#fff',
+                        padding: '6px 10px', borderRadius: 'var(--r-full)',
+                        background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(8px)',
                     }}>
-                        {[0, 1, 2, 3].map((idx) => {
-                            const data = previewItems[idx];
-                            const image = getProductImage(data?.product);
-                            return (
-                                <div key={idx} style={{
-                                    borderRadius: 'var(--r-md)',
-                                    overflow: 'hidden',
-                                    background: 'var(--clr-surface-2)',
-                                    position: 'relative',
-                                    border: '1px solid var(--glass-border)',
-                                }}>
-                                    {image ? (
-                                        <img
-                                            src={image}
-                                            alt={data?.product?.name || `Outfit item ${idx + 1}`}
-                                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                        />
-                                    ) : (
-                                        <div style={{
-                                            width: '100%',
-                                            height: '100%',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: 'var(--clr-text-3)',
-                                            fontSize: 11,
-                                            fontWeight: 600,
-                                        }}>
-                                            {data ? 'No Image' : 'Empty'}
-                                        </div>
-                                    )}
-                                    {idx === 3 && itemIds.length > 4 && (
-                                        <div style={{
-                                            position: 'absolute',
-                                            inset: 0,
-                                            background: 'rgba(0,0,0,0.42)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            color: '#fff',
-                                            fontWeight: 700,
-                                            fontSize: 16,
-                                            letterSpacing: '0.04em',
-                                        }}>
-                                            +{itemIds.length - 4}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                        {visibilityPublic ? <Globe size={12} /> : <Lock size={12} />}
+                        {visibilityPublic ? 'Public' : 'Private'}
                     </div>
 
-                    <div style={{
-                        position: 'absolute',
-                        top: 'var(--sp-3)',
-                        left: 'var(--sp-3)',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: '#fff',
-                        padding: '6px 10px',
-                        borderRadius: 'var(--r-full)',
-                        background: 'rgba(0,0,0,0.45)',
-                        backdropFilter: 'blur(8px)',
-                    }}>
-                        {visibilityPublic ? <Globe size={12} /> : <Lock size={12} />} {visibilityPublic ? 'Public' : 'Private'}
-                    </div>
+                    {/* AI Preview badge + expand hint — top right */}
+                    {outfit.generated_image_url && (
+                        <div style={{
+                            position: 'absolute', top: 'var(--sp-3)', right: 'var(--sp-3)',
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 10, fontWeight: 700, color: '#fff',
+                            padding: '5px 9px', borderRadius: 'var(--r-full)',
+                            background: 'linear-gradient(135deg, rgba(124,58,237,0.85), rgba(192,38,211,0.85))',
+                            backdropFilter: 'blur(8px)',
+                        }}>
+                            ✨ AI Preview
+                        </div>
+                    )}
                 </div>
+
 
                 <div style={{
                     padding: 'var(--sp-4)',
@@ -410,6 +428,71 @@ export default function CommunityOutfitCard({
                             }
                         }
                     `}</style>
+                </div>
+            )}
+
+            {/* ── Fullscreen AI Image Lightbox ── */}
+            {lightboxOpen && outfit.generated_image_url && (
+                <div
+                    onClick={() => setLightboxOpen(false)}
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        background: 'rgba(4,4,10,0.90)',
+                        backdropFilter: 'blur(12px)',
+                        zIndex: 500,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '24px',
+                    }}
+                >
+                    {/* Close button */}
+                    <button
+                        onClick={() => setLightboxOpen(false)}
+                        style={{
+                            position: 'absolute', top: 20, right: 20,
+                            background: 'rgba(255,255,255,0.12)',
+                            border: '1px solid rgba(255,255,255,0.2)',
+                            borderRadius: '50%',
+                            width: 44, height: 44,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#fff', cursor: 'pointer',
+                            backdropFilter: 'blur(8px)',
+                            transition: 'background 0.2s',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.25)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.12)'}
+                    >
+                        <X size={20} />
+                    </button>
+
+                    {/* Label */}
+                    <div style={{
+                        position: 'absolute', top: 20, left: 20,
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        fontSize: 13, fontWeight: 700, color: '#fff',
+                        padding: '6px 14px', borderRadius: '999px',
+                        background: 'linear-gradient(135deg, rgba(124,58,237,0.9), rgba(192,38,211,0.9))',
+                        backdropFilter: 'blur(8px)',
+                    }}>
+                        ✨ AI Outfit Preview — {outfit.name}
+                    </div>
+
+                    {/* Full image — stop click from closing */}
+                    <img
+                        src={outfit.generated_image_url}
+                        alt={`Full AI outfit preview for ${outfit.name}`}
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                            maxWidth: '90vw',
+                            maxHeight: '90vh',
+                            objectFit: 'contain',
+                            borderRadius: '16px',
+                            boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+                            display: 'block',
+                        }}
+                    />
                 </div>
             )}
         </>
