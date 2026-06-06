@@ -230,7 +230,7 @@ export default function CommunityOutfitCard({
                             onClick={() => onAddFullOutfitToCart && onAddFullOutfitToCart(outfit)}
                             disabled={isBusy || itemIds.length === 0}
                         >
-                            <ShoppingBag size={14} /> Add Full Outfit
+                            <ShoppingBag size={14} /> Choose Sizes
                         </button>
                         <button
                             className="btn btn-ghost btn-sm"
@@ -353,7 +353,7 @@ export default function CommunityOutfitCard({
                                             disabled={!available}
                                             style={{ width: '100%', marginTop: 10 }}
                                         >
-                                            <ShoppingBag size={14} /> Add to Cart
+                                            <ShoppingBag size={14} /> Choose Size
                                         </button>
                                     </div>
                                 );
@@ -370,7 +370,7 @@ export default function CommunityOutfitCard({
                             paddingTop: 'var(--sp-4)',
                         }}>
                             <button className="btn btn-primary" onClick={() => onAddFullOutfitToCart && onAddFullOutfitToCart(outfit)}>
-                                <ShoppingBag size={15} /> Add Full Outfit to Cart
+                                <ShoppingBag size={15} /> Choose Sizes & Add
                             </button>
                             <button className="btn btn-ghost" onClick={() => setDetailsOpen(false)}>
                                 Close Details

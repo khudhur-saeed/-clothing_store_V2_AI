@@ -63,6 +63,9 @@ export function CartProvider({ children }) {
         if (qtyToAdd < 1) {
             throw new Error('Quantity must be at least 1');
         }
+        if (!variant?.variant_id) {
+            throw new Error('Please choose a size before adding to cart');
+        }
 
         const token = localStorage.getItem('moda_token');
         if (!token) {
@@ -90,7 +93,7 @@ export function CartProvider({ children }) {
                     productName: product.name,
                     color: variant.color || '',
                     size: variant.size || '',
-                    price: Number(product.price) || 0,
+                    price: Number(variant.price ?? product.price) || 0,
                     stock: Number(variant.stock ?? 0),
                     quantity: qtyToAdd,
                     image: Array.isArray(imgs) ? (imgs[0]?.url || imgs[0] || '') : '',

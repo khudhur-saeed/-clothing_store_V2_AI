@@ -25,8 +25,25 @@ function normalizeEnum(value) {
     return value;
 }
 
+function normalizeVariant(variant) {
+    const images = Array.isArray(variant?.images)
+        ? variant.images
+            .map((image) => (typeof image === 'string' ? image : image?.url))
+            .filter(Boolean)
+        : [];
+
+    return {
+        ...variant,
+        variant_id: variant?.variant_id ?? variant?.id,
+        size: variant?.size || 'One Size',
+        stock: Number(variant?.stock ?? 0),
+        price: Number(variant?.price ?? 0),
+        images,
+    };
+}
+
 function buildProductPreview(product, variants = []) {
-    const safeVariants = Array.isArray(variants) ? variants : [];
+    const safeVariants = Array.isArray(variants) ? variants.map(normalizeVariant).filter(Boolean) : [];
     const primaryVariant = safeVariants.find(v => (v.stock ?? 0) > 0) || safeVariants[0] || null;
     const image = Array.isArray(primaryVariant?.images) && primaryVariant.images.length > 0
         ? primaryVariant.images[0]
@@ -40,6 +57,7 @@ function buildProductPreview(product, variants = []) {
         department: normalizeEnum(product.department),
         outfitSlot: normalizeEnum(product.outfit_slot),
         image,
+        variants: safeVariants,
         primaryVariant: primaryVariant
             ? {
                 ...primaryVariant,
@@ -55,6 +73,227 @@ function LoadingPanel({ text }) {
         <div className="text-center" style={{ padding: 'var(--sp-16) 0' }}>
             <Loader2 size={36} style={{ margin: '0 auto var(--sp-3)', animation: 'spin 0.9s linear infinite' }} />
             <p className="text-muted">{text}</p>
+        </div>
+    );
+}
+
+function VariantPickerModal({ title, subtitle, items, selections, onSelect, onClose, onConfirm, busy = false }) {
+    const canConfirm = items.length > 0 && items.every((item) => selections[item.id]);
+
+    return (
+        <div className="variant-modal-backdrop" onClick={busy ? undefined : onClose}>
+            <div className="variant-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="variant-modal-header">
+                    <div>
+                        <h2 className="variant-modal-title">{title}</h2>
+                        <p className="variant-modal-subtitle">{subtitle}</p>
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
+                        Close
+                    </button>
+                </div>
+
+                <div className="variant-modal-list">
+                    {items.map((item) => {
+                        const productVariants = item.variants || [];
+                        const selectedVariantId = selections[item.id];
+                        const selectedVariant = productVariants.find((variant) => variant.variant_id === selectedVariantId) || null;
+                        const previewImage = item.image || selectedVariant?.images?.[0] || '';
+
+                        return (
+                            <div key={item.id} className="variant-modal-item">
+                                <div className="variant-modal-item-media">
+                                    {previewImage
+                                        ? <img src={previewImage} alt={item.name} />
+                                        : <div className="variant-modal-empty">No image</div>}
+                                </div>
+
+                                <div className="variant-modal-item-body">
+                                    <div>
+                                        <div className="variant-modal-item-name">{item.name}</div>
+                                        <div className="variant-modal-item-meta">
+                                            ${Number(item.price || 0).toFixed(2)}
+                                        </div>
+                                    </div>
+
+                                    <div className="variant-modal-chip-grid">
+                                        {productVariants.length === 0 ? (
+                                            <span className="variant-modal-empty-text">No variants available</span>
+                                        ) : productVariants.map((variant) => {
+                                            const isSelected = selectedVariantId === variant.variant_id;
+                                            const isOutOfStock = Number(variant.stock ?? 0) <= 0;
+                                            return (
+                                                <button
+                                                    key={`${item.id}-${variant.variant_id}`}
+                                                    type="button"
+                                                    className={`variant-chip${isSelected ? ' is-selected' : ''}`}
+                                                    onClick={() => onSelect(item.id, variant.variant_id)}
+                                                    disabled={busy || isOutOfStock}
+                                                >
+                                                    <span>{variant.size || 'One Size'}</span>
+                                                    <small>{isOutOfStock ? 'Out of stock' : `$${Number(variant.price || item.price || 0).toFixed(2)}`}</small>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {selectedVariant && (
+                                        <div className="variant-modal-selected-note">
+                                            Selected: {selectedVariant.size || 'One Size'}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div className="variant-modal-footer">
+                    <div className="text-sm text-muted">
+                        Choose a size for every item before adding to cart.
+                    </div>
+                    <button className="btn btn-primary" onClick={onConfirm} disabled={!canConfirm || busy}>
+                        {busy ? 'Adding...' : 'Add to Cart'}
+                    </button>
+                </div>
+            </div>
+
+            <style>{`
+                .variant-modal-backdrop {
+                    position: fixed;
+                    inset: 0;
+                    z-index: 500;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: var(--sp-4);
+                    background: rgba(4,4,10,0.72);
+                    backdrop-filter: blur(8px);
+                }
+                .variant-modal {
+                    width: min(920px, 100%);
+                    max-height: 90vh;
+                    overflow: auto;
+                    border-radius: var(--r-xl);
+                    border: 1px solid var(--glass-border);
+                    background: var(--clr-surface);
+                    box-shadow: var(--shadow-xl);
+                    padding: var(--sp-5);
+                    display: flex;
+                    flex-direction: column;
+                    gap: var(--sp-4);
+                }
+                .variant-modal-header,
+                .variant-modal-footer {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: var(--sp-3);
+                    flex-wrap: wrap;
+                }
+                .variant-modal-title {
+                    font-size: 22px;
+                    font-weight: 800;
+                    margin-bottom: 6px;
+                }
+                .variant-modal-subtitle {
+                    color: var(--clr-text-2);
+                    font-size: 13px;
+                }
+                .variant-modal-list {
+                    display: grid;
+                    gap: var(--sp-3);
+                }
+                .variant-modal-item {
+                    display: grid;
+                    grid-template-columns: 92px 1fr;
+                    gap: var(--sp-3);
+                    padding: var(--sp-3);
+                    border: 1px solid var(--clr-border);
+                    border-radius: var(--r-lg);
+                    background: linear-gradient(155deg, var(--clr-surface), rgba(255,255,255,0.02));
+                }
+                .variant-modal-item-media {
+                    border-radius: var(--r-md);
+                    overflow: hidden;
+                    aspect-ratio: 3 / 4;
+                    background: var(--clr-surface-2);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: var(--clr-text-3);
+                    font-size: 11px;
+                }
+                .variant-modal-item-media img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+                .variant-modal-item-body {
+                    display: flex;
+                    flex-direction: column;
+                    gap: var(--sp-3);
+                }
+                .variant-modal-item-name {
+                    font-size: 15px;
+                    font-weight: 700;
+                    margin-bottom: 4px;
+                }
+                .variant-modal-item-meta {
+                    font-size: 12px;
+                    color: var(--clr-text-2);
+                }
+                .variant-modal-chip-grid {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 8px;
+                }
+                .variant-chip {
+                    min-width: 84px;
+                    padding: 10px 12px;
+                    border-radius: var(--r-md);
+                    border: 1px solid var(--clr-border);
+                    background: var(--clr-bg-3);
+                    color: var(--clr-text);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 2px;
+                    cursor: pointer;
+                    transition: all var(--tr-fast);
+                }
+                .variant-chip:hover:not(:disabled) {
+                    border-color: var(--clr-primary);
+                    transform: translateY(-1px);
+                }
+                .variant-chip.is-selected {
+                    border-color: var(--clr-primary);
+                    background: rgba(192,132,252,0.14);
+                    box-shadow: 0 0 0 1px rgba(192,132,252,0.15) inset;
+                }
+                .variant-chip:disabled {
+                    cursor: not-allowed;
+                    opacity: 0.55;
+                }
+                .variant-chip small {
+                    font-size: 10px;
+                    color: var(--clr-text-3);
+                }
+                .variant-modal-empty-text {
+                    font-size: 12px;
+                    color: var(--clr-text-3);
+                }
+                .variant-modal-selected-note {
+                    font-size: 12px;
+                    color: var(--clr-success);
+                    font-weight: 600;
+                }
+                @media (max-width: 720px) {
+                    .variant-modal-item {
+                        grid-template-columns: 1fr;
+                    }
+                }
+            `}</style>
         </div>
     );
 }
@@ -95,6 +334,12 @@ export default function OutfitGalleryPage() {
     const [catalogSearch, setCatalogSearch] = useState('');
     const [savingEditor, setSavingEditor] = useState(false);
     const [draggedItemId, setDraggedItemId] = useState(null);
+    const [variantPickerOpen, setVariantPickerOpen] = useState(false);
+    const [variantPickerTitle, setVariantPickerTitle] = useState('');
+    const [variantPickerSubtitle, setVariantPickerSubtitle] = useState('');
+    const [variantPickerItems, setVariantPickerItems] = useState([]);
+    const [variantSelections, setVariantSelections] = useState({});
+    const [variantPickerBusy, setVariantPickerBusy] = useState(false);
 
     useEffect(() => {
         if (sectionFromUrl === 'create') {
@@ -304,45 +549,88 @@ export default function OutfitGalleryPage() {
     };
 
     const handleAddSingleProductToCart = async (product) => {
-        if (!product?.primaryVariant) {
+        const variants = Array.isArray(product?.variants) ? product.variants : [];
+        const availableVariants = variants.filter((variant) => Number(variant?.stock ?? 0) > 0);
+
+        if (availableVariants.length === 0) {
             showToast('This product is currently unavailable', 'error');
             return;
         }
-        try {
-            await addToCart(product, product.primaryVariant, 1);
-            showToast(`${product.name} added to cart`, 'success');
-        } catch (err) {
-            showToast(err.message || 'Not enough stock available', 'error');
-        }
+
+        setVariantPickerTitle('Choose a size');
+        setVariantPickerSubtitle(product.name);
+        setVariantPickerItems([{ ...product, variants: availableVariants }]);
+        setVariantSelections({
+            [product.id]: availableVariants.length === 1 ? availableVariants[0].variant_id : '',
+        });
+        setVariantPickerOpen(true);
     };
 
     const handleAddFullOutfitToCart = async (outfit) => {
         const products = (outfit.items || [])
             .map(id => productMap[id])
-            .filter(p => p && p.primaryVariant);
+            .filter(Boolean)
+            .map((product) => {
+                const variants = Array.isArray(product.variants) ? product.variants : [];
+                const availableVariants = variants.filter((variant) => Number(variant?.stock ?? 0) > 0);
+                return availableVariants.length > 0 ? { ...product, variants: availableVariants } : null;
+            })
+            .filter(Boolean);
 
         if (products.length === 0) {
             showToast('No available products to add from this outfit', 'error');
             return;
         }
 
-        let addedCount = 0;
-        let lastError = '';
-        for (const product of products) {
-            try {
-                await addToCart(product, product.primaryVariant, 1);
-                addedCount += 1;
-            } catch (err) {
-                lastError = err.message || 'Not enough stock available';
-            }
-        }
+        const nextSelections = products.reduce((acc, product) => {
+            acc[product.id] = product.variants.length === 1 ? product.variants[0].variant_id : '';
+            return acc;
+        }, {});
 
-        if (addedCount > 0) {
-            showToast(`Added ${addedCount} product(s) from outfit`, 'success');
+        setVariantPickerTitle(`Choose sizes for ${outfit.name}`);
+        setVariantPickerSubtitle(`${products.length} item(s) ready to add`);
+        setVariantPickerItems(products);
+        setVariantSelections(nextSelections);
+        setVariantPickerOpen(true);
+    };
+
+    const handleConfirmVariantSelection = async () => {
+        if (variantPickerItems.length === 0) return;
+
+        setVariantPickerBusy(true);
+        try {
+            let addedCount = 0;
+            for (const product of variantPickerItems) {
+                const selectedVariantId = variantSelections[product.id];
+                if (!selectedVariantId) {
+                    throw new Error(`Please choose a size for ${product.name}`);
+                }
+
+                const variant = (product.variants || []).find((item) => item.variant_id === selectedVariantId);
+                if (!variant) {
+                    throw new Error(`Selected size is no longer available for ${product.name}`);
+                }
+
+                await addToCart(product, variant, 1);
+                addedCount += 1;
+            }
+
+            showToast(`Added ${addedCount} item(s) to cart`, 'success');
+            setVariantPickerOpen(false);
+            setVariantPickerItems([]);
+            setVariantSelections({});
+        } catch (err) {
+            showToast(err.message || 'Not enough stock available', 'error');
+        } finally {
+            setVariantPickerBusy(false);
         }
-        if (addedCount < products.length) {
-            showToast(lastError || 'Some items could not be added due to stock limits', 'error');
-        }
+    };
+
+    const handleVariantSelectionChange = (productId, variantId) => {
+        setVariantSelections((prev) => ({
+            ...prev,
+            [productId]: variantId,
+        }));
     };
 
     const toggleEditorProduct = (productId) => {
@@ -727,6 +1015,24 @@ export default function OutfitGalleryPage() {
                             </div>
                         </div>
                     </section>
+                )}
+
+                {variantPickerOpen && (
+                    <VariantPickerModal
+                        title={variantPickerTitle}
+                        subtitle={variantPickerSubtitle}
+                        items={variantPickerItems}
+                        selections={variantSelections}
+                        onSelect={handleVariantSelectionChange}
+                        onClose={() => {
+                            if (variantPickerBusy) return;
+                            setVariantPickerOpen(false);
+                            setVariantPickerItems([]);
+                            setVariantSelections({});
+                        }}
+                        onConfirm={handleConfirmVariantSelection}
+                        busy={variantPickerBusy}
+                    />
                 )}
 
                 <style>{`
