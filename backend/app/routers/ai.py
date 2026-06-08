@@ -1,9 +1,11 @@
 import io
 import os
 import base64
+import re
 import urllib.request
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+from datetime import datetime
 from typing import List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
@@ -16,11 +18,14 @@ import httpx
 
 from app.core.config import settings
 from app.core.cloud_storage import upload_ai_image
-from app.dependencies import get_db, get_current_user
+from app.dependencies import get_db, get_current_user, get_optional_current_user
+from app.models.address import Address
+from app.models.coupon import Coupon
+from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.product_variant import ProductVariant
 from app.models.outfit import Outfit, OutfitProduct
-from app.core.search import search_products
+from app.models.shipping import Shipping
 
 # Configure Gemini with the API key from environment variables
 genai.configure(api_key=settings.VITE_GEMINI_API_KEY)
@@ -38,55 +43,420 @@ class ChatRequest(BaseModel):
     user_message: str
 
 
-def _get_products_for_chat(db: Session, user_message: str, limit: int = 5) -> List[Product]:
-    """Retrieve relevant active products for chatbot answers.
+VERIFICATION_FALLBACK = "I could not verify this information from the available data source."
+SIGN_IN_PROMPT = "Please sign in so I can safely look up your account-specific information."
 
-    Primary path: Elasticsearch via search_products().
-    Fallback path: PostgreSQL ILIKE if Elasticsearch is unavailable.
-    """
-    matched_ids = search_products(user_message)
 
-    if matched_ids is None:
-        # Elasticsearch unavailable -> fallback to DB text search
-        return (
-            db.query(Product)
-            .filter(Product.status == "active")
-            .filter(
-                or_(
-                    Product.name.ilike(f"%{user_message}%"),
-                    Product.description.ilike(f"%{user_message}%"),
+def _clean_message(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def _format_currency(value) -> str:
+    try:
+        return f"${float(value):.2f}"
+    except Exception:
+        return "$0.00"
+
+
+def _extract_order_id(message: str) -> Optional[int]:
+    patterns = [
+        r"(?:order|order\s+no\.?|order\s+id|tracking)\s*#?\s*(\d+)",
+        r"#(\d{3,})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                continue
+    return None
+
+
+def _extract_coupon_code(message: str) -> Optional[str]:
+    patterns = [
+        r"(?:coupon|code|promo|promotion|discount)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{2,})",
+        r"\b([A-Z0-9][A-Z0-9_-]{3,})\b",
+    ]
+    upper_message = message.upper()
+    for pattern in patterns:
+        match = re.search(pattern, upper_message)
+        if match:
+            return match.group(1).strip().upper()
+    return None
+
+
+def _extract_product_hint(message: str) -> Optional[str]:
+    lowered = message.lower()
+    stop_words = {
+        "what", "is", "the", "price", "of", "for", "my", "show", "me", "product",
+        "products", "size", "sizes", "color", "colors", "stock", "inventory", "available",
+        "available", "details", "detail", "about", "tell", "me", "this", "that", "item",
+        "items", "variant", "variants", "dress", "shirt", "pants", "shoes", "top", "bottom",
+        "outerwear", "accessories", "coupon", "code", "order", "orders", "track", "tracking",
+        "shipping", "address", "status", "delivery", "refund", "coupon", "discount", "promo",
+    }
+    tokens = [token for token in re.split(r"[^a-z0-9]+", lowered) if token and token not in stop_words]
+    if not tokens:
+        return None
+    if len(tokens) > 4:
+        tokens = tokens[:4]
+    return " ".join(tokens)
+
+
+def _is_order_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in ["order", "orders", "tracking", "track", "delivery", "refund", "shipping address", "shipping status"])
+
+
+def _is_coupon_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in ["coupon", "discount code", "promo", "promotion", "offer", "voucher"])
+
+
+def _is_address_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in ["address", "addresses", "shipping address", "default address"])
+
+
+def _is_product_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(keyword in lowered for keyword in ["product", "price", "size", "sizes", "color", "colors", "stock", "inventory", "available"])
+
+
+def _product_image_url(variant: ProductVariant) -> str:
+    images = variant.images or []
+    for image in images:
+        if isinstance(image, str) and image:
+            return image
+        if isinstance(image, dict):
+            candidate = image.get("url") or image.get("src") or ""
+            if candidate:
+                return candidate
+    return ""
+
+
+def _format_product_result(product: Product, variants: List[ProductVariant]) -> dict:
+    variant_rows = []
+    colors = []
+    sizes = []
+    total_stock = 0
+
+    for variant in variants:
+        stock = max(int(variant.stock or 0), 0)
+        total_stock += stock
+        if variant.color and variant.color not in colors:
+            colors.append(variant.color)
+        if variant.size and variant.size not in sizes:
+            sizes.append(variant.size)
+        variant_rows.append({
+            "variant_id": variant.variant_id,
+            "color": variant.color or "",
+            "size": variant.size or "One Size",
+            "stock": stock,
+            "image_url": _product_image_url(variant),
+        })
+
+    primary_image = next((row["image_url"] for row in variant_rows if row["image_url"]), "")
+    department = product.department.value if hasattr(product.department, "value") else str(product.department or "")
+    piece_type = product.piece_type.value if hasattr(product.piece_type, "value") else str(product.piece_type or "")
+
+    return {
+        "id": product.product_id,
+        "product_id": product.product_id,
+        "name": product.name,
+        "title": product.name,
+        "price": float(product.price) if product.price is not None else 0.0,
+        "base_price": float(product.price) if product.price is not None else 0.0,
+        "status": product.status,
+        "category": product.category or "",
+        "description": product.description or "",
+        "image_url": primary_image,
+        "sizes": sizes,
+        "colors": colors,
+        "total_stock": total_stock,
+        "variants": variant_rows,
+        "department": department,
+        "piece_type": piece_type,
+    }
+
+
+def _find_products(db: Session, message: str, limit: int = 3) -> List[Product]:
+    # 1. Try to search using Elasticsearch
+    try:
+        from app.core.search import search_products, _is_es_available
+        if _is_es_available():
+            es_ids = search_products(message)
+            if es_ids:
+                id_order = {id_: index for index, id_ in enumerate(es_ids)}
+                products = (
+                    db.query(Product)
+                    .filter(Product.product_id.in_(es_ids), Product.status == "active")
+                    .all()
                 )
-            )
-            .limit(limit)
-            .all()
-        )
+                products.sort(key=lambda p: id_order.get(p.product_id, 9999))
+                return products[:limit]
+    except Exception as es_err:
+        print(f"Elasticsearch search error: {es_err}")
 
-    if len(matched_ids) == 0:
-        # If ES returns no hits, fallback to DB text search to keep chatbot useful.
-        return (
-            db.query(Product)
-            .filter(Product.status == "active")
-            .filter(
-                or_(
-                    Product.name.ilike(f"%{user_message}%"),
-                    Product.description.ilike(f"%{user_message}%"),
-                )
-            )
-            .limit(limit)
-            .all()
-        )
+    # 2. Database Fallback (PostgreSQL ILIKE search)
+    hint = _extract_product_hint(message)
+    filters = [Product.status == "active"]
+    if hint:
+        like_value = f"%{hint}%"
+        filters.append(or_(Product.name.ilike(like_value), Product.description.ilike(like_value)))
+    else:
+        tokens = [token for token in re.split(r"[^a-z0-9]+", message.lower()) if len(token) > 2]
+        if not tokens:
+            return []
+        filters.append(or_(*[
+            Product.name.ilike(f"%{token}%")
+            for token in tokens[:4]
+        ]))
 
-    # Keep returned order aligned with Elasticsearch relevance order
-    products = (
-        db.query(Product)
-        .filter(Product.status == "active")
-        .filter(Product.product_id.in_(matched_ids))
+    query = db.query(Product).filter(*filters)
+    return query.limit(limit).all()
+
+
+def _find_order_for_user(db: Session, current_user, message: str) -> Optional[Order]:
+    order_id = _extract_order_id(message)
+    query = db.query(Order).filter(Order.user_id == current_user.user_id)
+    if order_id is not None:
+        return query.filter(Order.orderid == order_id).first()
+
+    return None
+
+
+def _list_orders_for_user(db: Session, current_user, limit: int = 5) -> List[Order]:
+    return (
+        db.query(Order)
+        .filter(Order.user_id == current_user.user_id)
+        .order_by(Order.orderid.desc())
+        .limit(limit)
         .all()
     )
 
-    products_by_id = {p.product_id: p for p in products}
-    ordered = [products_by_id[pid] for pid in matched_ids if pid in products_by_id]
-    return ordered[:limit]
+
+def _serialize_order_for_chat(db: Session, order: Order) -> dict:
+    items = (
+        db.query(OrderItem)
+        .filter(OrderItem.orderid == order.orderid)
+        .all()
+    )
+
+    address = db.query(Address).filter(Address.address_id == order.address_id).first() if order.address_id else None
+    shipping = db.query(Shipping).filter(Shipping.orderid == order.orderid).first()
+
+    item_rows = []
+    for item in items:
+        variant = db.query(ProductVariant).filter(ProductVariant.variant_id == item.variant_id).first()
+        product = db.query(Product).filter(Product.product_id == variant.product_id).first() if variant else None
+        item_rows.append({
+            "variant_id": item.variant_id,
+            "product_id": variant.product_id if variant else None,
+            "product_name": product.name if product else "Unknown Product",
+            "color": variant.color if variant else "",
+            "size": variant.size if variant else "",
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price) if item.unit_price is not None else 0.0,
+        })
+
+    address_text = None
+    if address:
+        parts = [address.title, address.street, address.city, address.country, address.zip_code]
+        address_text = ", ".join([str(part) for part in parts if part])
+
+    return {
+        "orderid": order.orderid,
+        "status": order.status or "processing",
+        "order_date": order.order_date.isoformat() if order.order_date else None,
+        "payment": order.payment or "",
+        "coupon_code": order.coupon_code or None,
+        "total_price": float(order.total_price) if order.total_price is not None else 0.0,
+        "shipping_address": address_text,
+        "shipping_status": shipping.shipping_status if shipping else None,
+        "tracking_number": shipping.tracking_number if shipping else None,
+        "estimated_delivery": shipping.estimated_delivery.isoformat() if shipping and shipping.estimated_delivery else None,
+        "items": item_rows,
+    }
+
+
+def _valid_coupon_query(db: Session, code: Optional[str] = None, limit: int = 3) -> List[Coupon]:
+    now = datetime.utcnow()
+    query = db.query(Coupon)
+
+    if code:
+        return query.filter(Coupon.coupon_code == code.upper()).limit(1).all()
+
+    return query.filter(
+        Coupon.is_active.is_(True),
+        or_(Coupon.start_at.is_(None), Coupon.start_at <= now),
+        or_(Coupon.end_at.is_(None), Coupon.end_at >= now),
+    ).limit(limit).all()
+
+
+def _serialize_coupon_for_chat(coupon: Coupon) -> dict:
+    now = datetime.utcnow()
+    is_active = bool(coupon.is_active)
+    within_start = not coupon.start_at or coupon.start_at <= now
+    within_end = not coupon.end_at or coupon.end_at >= now
+    if coupon.expiration_date and coupon.expiration_date < now.date():
+        within_end = False
+
+    return {
+        "coupon_code": coupon.coupon_code,
+        "discount": float(coupon.discount) if coupon.discount is not None else 0.0,
+        "min_order_amount": float(coupon.min_order_amount) if coupon.min_order_amount is not None else 0.0,
+        "usage_limit": coupon.usage_limit or 0,
+        "used_count": coupon.used_count or 0,
+        "start_at": coupon.start_at.isoformat() if coupon.start_at else None,
+        "end_at": coupon.end_at.isoformat() if coupon.end_at else None,
+        "expiration_date": coupon.expiration_date.isoformat() if coupon.expiration_date else None,
+        "is_valid": bool(is_active and within_start and within_end and (coupon.usage_limit is None or (coupon.used_count or 0) < coupon.usage_limit)),
+    }
+
+
+def _respond_with_products(db: Session, message: str) -> dict:
+    products = _find_products(db, message, limit=3)
+    if not products:
+        return {
+            "response": VERIFICATION_FALLBACK,
+            "products": [],
+        }
+
+    product_payloads = []
+    response_lines = ["I found these products in the store database:"]
+    for product in products:
+        variants = db.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
+        payload = _format_product_result(product, variants)
+        product_payloads.append(payload)
+
+        size_text = ", ".join(payload["sizes"]) if payload["sizes"] else "no sizes recorded"
+        color_text = ", ".join(payload["colors"]) if payload["colors"] else "no colors recorded"
+        stock_text = "in stock" if payload["total_stock"] > 0 else "out of stock"
+        response_lines.append(
+            f"- {product.name}: price {_format_currency(payload['price'])}, sizes {size_text}, colors {color_text}, {stock_text}."
+        )
+
+    return {
+        "response": "\n".join(response_lines),
+        "products": product_payloads,
+    }
+
+
+def _respond_with_orders(db: Session, current_user, message: str) -> dict:
+    if current_user is None:
+        return {
+            "response": SIGN_IN_PROMPT,
+            "products": [],
+        }
+
+    order = _find_order_for_user(db, current_user, message)
+    if order:
+        payload = _serialize_order_for_chat(db, order)
+        lines = [
+            f"Order #{payload['orderid']} is {payload['status'] or 'processing' }.",
+            f"Order date: {payload['order_date'] or 'unavailable' }.",
+            f"Payment: {payload['payment'] or 'unavailable' }.",
+            f"Total: {_format_currency(payload['total_price'])}.",
+        ]
+        if payload.get("shipping_status"):
+            lines.append(f"Shipping status: {payload['shipping_status']}.")
+        if payload.get("tracking_number"):
+            lines.append(f"Tracking number: {payload['tracking_number']}.")
+        if payload.get("estimated_delivery"):
+            lines.append(f"Estimated delivery: {payload['estimated_delivery']}.")
+        if payload.get("shipping_address"):
+            lines.append(f"Shipping address: {payload['shipping_address']}.")
+
+        item_lines = []
+        for item in payload["items"]:
+            item_lines.append(
+                f"- {item['product_name']} x{item['quantity']} (size {item['size'] or 'unavailable'}, color {item['color'] or 'unavailable'})"
+            )
+        if item_lines:
+            lines.append("Items:")
+            lines.extend(item_lines)
+
+        return {
+            "response": "\n".join(lines),
+            "products": [],
+        }
+
+    orders = _list_orders_for_user(db, current_user, limit=5)
+    if not orders:
+        return {
+            "response": "No matching order was found for your account.",
+            "products": [],
+        }
+
+    lines = ["Here are your recent orders:"]
+    for order_row in orders:
+        total = _format_currency(order_row.total_price)
+        order_date = order_row.order_date.isoformat() if order_row.order_date else "unavailable"
+        lines.append(f"- Order #{order_row.orderid}: {order_row.status or 'processing'}, placed {order_date}, total {total}.")
+
+    return {
+        "response": "\n".join(lines),
+        "products": [],
+    }
+
+
+def _respond_with_coupons(db: Session, message: str) -> dict:
+    code = _extract_coupon_code(message)
+    coupons = _valid_coupon_query(db, code=code, limit=5)
+
+    if not coupons:
+        return {
+            "response": "No valid coupon is available right now.",
+            "products": [],
+        }
+
+    payloads = [_serialize_coupon_for_chat(coupon) for coupon in coupons]
+    lines = []
+    for coupon in payloads:
+        validity = "valid" if coupon["is_valid"] else "not currently valid"
+        lines.append(
+            f"{coupon['coupon_code']}: {coupon['discount']:.0f}% off, minimum order {_format_currency(coupon['min_order_amount'])}, {validity}."
+        )
+
+    return {
+        "response": "\n".join(lines),
+        "products": [],
+    }
+
+
+def _respond_with_addresses(db: Session, current_user) -> dict:
+    if current_user is None:
+        return {
+            "response": SIGN_IN_PROMPT,
+            "products": [],
+        }
+
+    addresses = (
+        db.query(Address)
+        .filter(Address.user_id == current_user.user_id)
+        .order_by(Address.is_default.desc(), Address.address_id.desc())
+        .all()
+    )
+
+    if not addresses:
+        return {
+            "response": "No saved addresses were found for your account.",
+            "products": [],
+        }
+
+    lines = ["Here are your saved addresses:"]
+    for address in addresses:
+        parts = [address.title, address.street, address.city, address.country, address.zip_code]
+        address_text = ", ".join([str(part) for part in parts if part]) or "Address details unavailable"
+        label = "default" if address.is_default else "saved"
+        lines.append(f"- {label.capitalize()} address #{address.address_id}: {address_text}.")
+
+    return {
+        "response": "\n".join(lines),
+        "products": [],
+    }
 
 
 def _format_products_for_prompt(products: List[Product]) -> str:
@@ -118,81 +488,272 @@ def _format_products_for_user(products: List[Product]) -> str:
     return "\n".join(lines)
 
 
+SYSTEM_INSTRUCTIONS = """You are Moda Assistant, a professional shopping assistant for Moda, a premium fashion clothing store.
+Your goal is to assist customers with product information, order details, shipping status, addresses, and available coupons.
+
+Follow these strict formatting and presentation rules:
+
+## Response Formatting Rules
+- Do NOT use any Markdown formatting in customer-facing responses.
+- Do NOT use:
+  * Asterisks (*)
+  * Bullet lists
+  * Markdown headings (#)
+  * Code blocks (```)
+  * Markdown emphasis (like bolding with ** or italics)
+  * Markdown tables
+- Generate plain text responses only.
+- Use simple sentences and line breaks instead of Markdown.
+- All responses must be clean, UI-friendly plain text suitable for direct display inside a website chat interface.
+
+## Product Naming
+- Do not display excessively long product titles exactly as stored in the database.
+- Instead, use a clean, customer-friendly display name.
+- Remove unnecessary repetitions and technical catalog wording (like percentages of cotton, specific Turkish pattern names, fabric details, etc.).
+- Keep product names concise and readable, preserving important details such as product type, color, and fit.
+- Example: Instead of "Solo Erkek %100 Organik Pamuklu Kalın Dokulu Comfort Fit Bisiklet Yakalı Lacivert T-shirt 1 Grimelange...", display "Solo Comfort Fit T-Shirt - Navy".
+
+## Product Presentation
+- Present products in a clean, minimal, and plain text structured format using line breaks.
+- For each product, show ONLY:
+  Product Name: [Name]
+  Price: [Price]
+  Available Sizes: [Sizes]
+  Color: [Color]
+- Do NOT expose:
+  * Internal database identifiers (like ID: 326 or product_id)
+  * Raw JSON
+  * Hex color codes
+  * Technical metadata
+  * Inventory system fields (like stock count numbers)
+  * Backend attributes or internal category codes
+
+## Natural Language
+- Sound like a professional shopping assistant.
+- Use concise and modern language.
+- Avoid generic phrases such as:
+  * "I've found a few fantastic t-shirts for you"
+  * "Here are some options"
+  * "I hope this helps"
+- Example preferred introductory phrasing:
+  "Here are the available T-shirts matching your search:"
+
+## Currency Handling
+- Always use the store's configured currency ($).
+- Never invent prices. Display prices exactly as returned by the database.
+
+## Hallucination Prevention
+- Only show products returned by the database.
+- Never invent products, prices, discounts, colors, sizes, or availability.
+- If the user is searching or asking for products, and no matching products are found in the database context, respond exactly with:
+  "No matching products were found."
+
+## Product Recommendation Rules
+- Use only database results.
+- Sort results by relevance.
+- Prioritize products that are in stock.
+- Limit responses to a reasonable number of products (3–5 by default).
+
+## UI-Friendly Output
+- Keep text minimal and avoid large paragraphs.
+- Prefer clean plain text with simple line breaks that can easily be rendered as product cards or mobile-friendly layouts.
+- Do not dump technical database fields.
+"""
+
+
 @router.post("/chat")
-def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db)):
+def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_user=Depends(get_optional_current_user)):
     try:
-        # 1. RAG Retrieval: Elasticsearch first, DB fallback if ES is unavailable
-        products = _get_products_for_chat(db, request.user_message, limit=5)
-        context_text = _format_products_for_prompt(products)
+        message = _clean_message(request.user_message)
+        if not message:
+            return {
+                "response": "Hello! I am your Moda Assistant. How can I help you today?",
+                "products": [],
+            }
 
-        # 2. Build Gemini History
-        system_context = f"""You are "Moda Assistant", a helpful customer service chatbot for MODA, a premium fashion e-commerce store.
-You help customers with: finding products, sizing advice, order tracking, returns, styling tips, and promotions.
-Be friendly, concise, and fashion-forward. Keep responses under 3 sentences unless a detailed answer is needed.
-Shipping is free on orders over $150. Returns accepted within 30 days.
-If product context is provided below, do not invent products outside that context.
-{context_text}"""
+        # Retrieve dynamic product list from database based on search/query
+        products = _find_products(db, message, limit=4)
+        product_payloads = []
+        if products:
+            for product in products:
+                variants = db.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
+                payload = _format_product_result(product, variants)
+                product_payloads.append(payload)
 
-        history_for_gemini = [
-            {"role": "user", "parts": [{"text": system_context}]},
-            {"role": "model", "parts": [{"text": "Understood! I'm ready to help MODA customers."}]}
-        ]
-        
-        for msg in request.history:
-            role = "user" if msg.sender_type == "user" else "model"
-            history_for_gemini.append({
-                "role": role,
-                "parts": [{"text": msg.content}]
-            })
+        # Try to call Gemini first for a friendly, context-rich response
+        try:
+            # 1. Gather all database contexts
+            context_parts = []
             
-        # 3. Generation
-        model = genai.GenerativeModel("gemini-3.1-flash-lite")
-        chat = model.start_chat(history=history_for_gemini)
-        response = chat.send_message(request.user_message)
+            # A. User Context
+            if current_user:
+                full_name = f"{current_user.first_name or ''} {current_user.last_name or ''}".strip() or "User"
+                context_parts.append(
+                    f"CURRENT_USER_INFO:\n"
+                    f"- Name: {full_name}\n"
+                    f"- Email: {current_user.email}\n"
+                    f"- User ID: {current_user.user_id}\n"
+                    f"- Status: Logged in"
+                )
+            else:
+                context_parts.append(
+                    "CURRENT_USER_INFO:\n"
+                    "- Status: Guest (Not logged in)"
+                )
 
-        final_text = (response.text or "").strip()
-        # Always include concrete product lines when we found matched items.
-        final_text += _format_products_for_user(products)
+            # B. Product Context
+            if product_payloads:
+                prod_context = ["PRODUCTS_MATCHING_QUERY:"]
+                for p in product_payloads:
+                    size_text = ", ".join(p["sizes"]) if p["sizes"] else "no sizes recorded"
+                    color_text = ", ".join(p["colors"]) if p["colors"] else "no colors recorded"
+                    stock_text = f"{p['total_stock']} in stock" if p["total_stock"] > 0 else "out of stock"
+                    prod_context.append(
+                        f"- Name: {p['name']}\n"
+                        f"  ID: {p['product_id']}\n"
+                        f"  Price: {_format_currency(p['price'])}\n"
+                        f"  Sizes: {size_text}\n"
+                        f"  Colors: {color_text}\n"
+                        f"  Stock: {stock_text}\n"
+                        f"  Description: {p['description'] or 'No description'}"
+                    )
+                context_parts.append("\n".join(prod_context))
 
-        # Build a quick product_id -> first image URL map
-        product_ids = [p.product_id for p in products]
-        variants = (
-            db.query(ProductVariant)
-            .filter(ProductVariant.product_id.in_(product_ids))
-            .all()
-        )
-        first_image_by_product = {}
-        for v in variants:
-            if v.product_id not in first_image_by_product:
-                images = v.images or []
-                if images:
-                    img = images[0]
-                    first_image_by_product[v.product_id] = img if isinstance(img, str) else (img.get("url") or img.get("src") or "")
+            # C. Coupon Context
+            coupons = _valid_coupon_query(db, limit=5)
+            if coupons:
+                coupon_context = ["AVAILABLE_ACTIVE_COUPONS:"]
+                for coupon in coupons:
+                    payload = _serialize_coupon_for_chat(coupon)
+                    validity = "Valid" if payload["is_valid"] else "Not currently valid"
+                    coupon_context.append(
+                        f"- Code: {payload['coupon_code']}\n"
+                        f"  Discount: {payload['discount']:.0f}%\n"
+                        f"  Minimum Order: {_format_currency(payload['min_order_amount'])}\n"
+                        f"  Validity: {validity}\n"
+                        f"  Expiration Date: {payload['expiration_date'] or 'None'}"
+                    )
+                context_parts.append("\n".join(coupon_context))
 
-        return {
-            "response": final_text,
-            "products": [
-                {
-                    "id": p.product_id,
-                    "product_id": p.product_id,
-                    "name": p.name,
-                    "title": p.name,
-                    "base_price": float(p.price) if p.price is not None else None,
-                    "price": float(p.price) if p.price is not None else None,
-                    "status": p.status,
-                    "category": p.category or "",
-                    "description": (p.description[:100] + "...") if p.description and len(p.description) > 100 else p.description,
-                    "image_url": first_image_by_product.get(p.product_id, ""),
-                }
-                for p in products
-            ],
-        }
+            # D. Order Context
+            if current_user:
+                # Check for a specific order ID in message
+                specific_order = _find_order_for_user(db, current_user, message)
+                if specific_order:
+                    payload = _serialize_order_for_chat(db, specific_order)
+                    items_str = ", ".join([
+                        f"{item['product_name']} x{item['quantity']} (Size: {item['size'] or 'N/A'}, Color: {item['color'] or 'N/A'})"
+                        for item in payload["items"]
+                    ])
+                    order_context = [
+                        f"SPECIFIC_ORDER_REQUESTED (Order #{payload['orderid']}):",
+                        f"- Status: {payload['status']}",
+                        f"- Date: {payload['order_date']}",
+                        f"- Total Price: {_format_currency(payload['total_price'])}",
+                        f"- Items: {items_str}",
+                        f"- Shipping Status: {payload['shipping_status'] or 'Processing'}",
+                        f"- Tracking Number: {payload['tracking_number'] or 'N/A'}",
+                        f"- Estimated Delivery: {payload['estimated_delivery'] or 'N/A'}",
+                        f"- Shipping Address: {payload['shipping_address'] or 'N/A'}"
+                    ]
+                    context_parts.append("\n".join(order_context))
+                
+                # Fetch recent orders
+                recent_orders = _list_orders_for_user(db, current_user, limit=5)
+                if recent_orders:
+                    orders_context = ["USER_RECENT_ORDERS:"]
+                    for order in recent_orders:
+                        total = _format_currency(order.total_price)
+                        order_date = order.order_date.isoformat() if order.order_date else "N/A"
+                        orders_context.append(
+                            f"- Order #{order.orderid}: status={order.status or 'processing'}, total={total}, placed={order_date}"
+                        )
+                    context_parts.append("\n".join(orders_context))
+            
+            # E. Address Context
+            if current_user:
+                addresses = (
+                    db.query(Address)
+                    .filter(Address.user_id == current_user.user_id)
+                    .order_by(Address.is_default.desc(), Address.address_id.desc())
+                    .all()
+                )
+                if addresses:
+                    addr_context = ["USER_SAVED_ADDRESSES:"]
+                    for address in addresses:
+                        parts = [address.title, address.street, address.city, address.country, address.zip_code]
+                        address_text = ", ".join([str(part) for part in parts if part]) or "N/A"
+                        label = "Default" if address.is_default else "Saved"
+                        addr_context.append(f"- {label} Address #{address.address_id}: {address_text}")
+                    context_parts.append("\n".join(addr_context))
+
+            database_context = "\n\n".join(context_parts)
+
+            # Build Chat History for Gemini Prompt
+            formatted_history = []
+            for msg in request.history:
+                # Skip static instructions / system fallbacks to keep history clean
+                if "I can verify orders" in msg.content or "I could not verify" in msg.content:
+                    continue
+                role = "user" if msg.sender_type == "user" else "model"
+                content = msg.content[:500] if msg.content else ""
+                if content.strip():
+                    formatted_history.append({"role": role, "parts": [content]})
+            
+            # Initialize model with system instructions
+            model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=SYSTEM_INSTRUCTIONS)
+            
+            contents = []
+            for h in formatted_history:
+                contents.append(h)
+                    
+            final_prompt = (
+                f"=== DATABASE CONTEXT ===\n"
+                f"{database_context}\n"
+                f"========================\n\n"
+                f"User Query: {message}"
+            )
+            contents.append({"role": "user", "parts": [final_prompt]})
+            
+            response = model.generate_content(contents)
+            response_text = response.text.strip()
+            
+            return {
+                "response": response_text,
+                "products": product_payloads,
+            }
+        except Exception as gemini_err:
+            print(f"Gemini chat error: {gemini_err}. Falling back to rule-based response.")
+            
+            if _is_order_request(message):
+                return _respond_with_orders(db, current_user, message)
+
+            if _is_address_request(message):
+                return _respond_with_addresses(db, current_user)
+
+            if _is_coupon_request(message):
+                return _respond_with_coupons(db, message)
+
+            if _is_product_request(message):
+                return _respond_with_products(db, message)
+
+            return {
+                "response": "I can verify orders, coupons, and product details from the store database. Ask me about a specific order number, coupon code, or product name.",
+                "products": product_payloads,
+            }
+
+    except HTTPException:
+        raise
     except Exception as e:
         error_msg = str(e)
         print(f"Error in chat: {error_msg}")
-        if "429" in error_msg or "quota" in error_msg.lower():
-            return {"response": "I'm sorry, but my AI services are currently unavailable because the Gemini API key has exceeded its quota limits. Please add billing to your Google Cloud project or use a new API key."}
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=VERIFICATION_FALLBACK)
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error in chat: {error_msg}")
+        raise HTTPException(status_code=500, detail=VERIFICATION_FALLBACK)
 
 
 @router.get("/image-base64")

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { apiCall } from '../api/client';
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const TRY_ON_MODEL_OVERRIDE = import.meta.env.VITE_GEMINI_TRYON_MODEL;
@@ -224,23 +224,10 @@ export async function virtualTryOn(userPhotoFile, productImageUrl, productName, 
  */
 export async function sendChatMessage(history, userMessage) {
     try {
-        const response = await fetch('http://localhost:8000/api/ai/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                history: history,
-                user_message: userMessage
-            })
+        const data = await apiCall('/ai/chat', { method: 'POST' }, {
+            history,
+            user_message: userMessage,
         });
-
-        if (!response.ok) {
-            console.error('Failed to get chat response from backend');
-            return null;
-        }
-
-        const data = await response.json();
         return {
             response: data.response || '',
             products: data.products || []

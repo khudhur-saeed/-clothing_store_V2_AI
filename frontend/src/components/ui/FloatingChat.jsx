@@ -5,14 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { sendChatMessage } from '../../utils/geminiService';
 import ProductCarousel from './ProductCarousel';
 
-const BOT_REPLIES = [
-    "I'm here to help! What would you like to know?",
-    "Check out our latest products in the catalog! Free shipping on orders over $150.",
-    "For order tracking, go to My Orders in your account menu.",
-    "You can apply coupon codes at checkout for discounts.",
-    "Our return policy allows returns within 30 days of purchase.",
-    "Each product page has a size guide to help you pick the right fit.",
-];
+const WELCOME_MESSAGE = "Hi there! 👋 I am your Moda Assistant. I can help you find products, check available coupons, track your orders, or answer any questions. How can I help you today?";
+const FALLBACK_MESSAGE = 'I could not verify this information from the available data source.';
 
 export default function FloatingChat() {
     const { conversations, sendMessage, addBotMessage, createConversation } = useApp();
@@ -61,7 +55,7 @@ export default function FloatingChat() {
     const ensureWelcomeMessage = () => {
         if (!convId) return;
         if (conv?.messages && conv.messages.length > 0) return;
-        addBotMessage(convId, BOT_REPLIES[0]);
+        addBotMessage(convId, WELCOME_MESSAGE);
     };
 
     useEffect(() => {
@@ -114,11 +108,11 @@ export default function FloatingChat() {
             // Try real Gemini chat first
             const history = conv?.messages || [];
             const aiReply = await sendChatMessage(history, msg);
-            const reply = aiReply?.response || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+            const reply = aiReply?.response || FALLBACK_MESSAGE;
             const products = aiReply?.products || [];
             addBotMessage(convId, reply, products);
         } catch {
-            addBotMessage(convId, BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)]);
+            addBotMessage(convId, FALLBACK_MESSAGE);
         }
         setTyping(false);
     };

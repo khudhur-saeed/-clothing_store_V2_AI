@@ -6,15 +6,7 @@ import { Link } from 'react-router-dom';
 import { sendChatMessage } from '../../utils/geminiService';
 import ProductCarousel from '../../components/ui/ProductCarousel';
 
-const BOT_REPLIES = [
-    "I'm here to help! What would you like to know about our products?",
-    "Great question! Our collection is updated regularly. Check out the catalog for the latest items.",
-    "For order tracking, head to My Orders in your profile menu.",
-    "We offer free shipping on orders over $150!",
-    "If you need to return an item, please contact support within 30 days of purchase.",
-    "You can apply coupon codes at checkout to get a discount on your order.",
-    "Our sizing guide is available on each product page to help you find the perfect fit.",
-];
+const FALLBACK_MESSAGE = 'I could not verify this information from the available data source.';
 
 export default function ChatbotPage() {
     const { conversations, sendMessage, addBotMessage, createConversation, renameConversation, deleteConversation } = useApp();
@@ -62,16 +54,14 @@ export default function ChatbotPage() {
             const aiResponse = await sendChatMessage(history, msg);
             
             if (aiResponse) {
-                const reply = aiResponse.response || BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
+                const reply = aiResponse.response || FALLBACK_MESSAGE;
                 const products = aiResponse.products || [];
                 addBotMessage(activeConv, reply, products);
             } else {
-                const fallback = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
-                addBotMessage(activeConv, fallback);
+                addBotMessage(activeConv, FALLBACK_MESSAGE);
             }
         } catch {
-            const fallback = BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)];
-            addBotMessage(activeConv, fallback);
+            addBotMessage(activeConv, FALLBACK_MESSAGE);
         }
 
         setTyping(false);
