@@ -181,12 +181,32 @@ def _format_product_result(product: Product, variants: List[ProductVariant]) -> 
     }
 
 
+def _translate_query_to_keywords(message: str) -> str:
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        prompt = (
+            "You are a translation assistant for an e-commerce search engine. "
+            "Translate the following user search query into simple, space-separated fashion keywords in Turkish and English. "
+            "Output ONLY the translated keywords, with no explanation or punctuation. "
+            f"Query: {message}"
+        )
+        response = model.generate_content(prompt)
+        text = response.text.strip() if response.text else message
+        return text
+    except Exception as e:
+        print(f"Query translation failed: {e}")
+        return message
+
+
 def _find_products(db: Session, message: str, limit: int = 3) -> List[Product]:
+    # Translate query to fashion-focused English/Turkish keywords
+    search_query = _translate_query_to_keywords(message)
+
     # 1. Try to search using Elasticsearch
     try:
         from app.core.search import search_products, _is_es_available
         if _is_es_available():
-            es_ids = search_products(message)
+            es_ids = search_products(search_query)
             if es_ids:
                 id_order = {id_: index for index, id_ in enumerate(es_ids)}
                 products = (
@@ -200,13 +220,13 @@ def _find_products(db: Session, message: str, limit: int = 3) -> List[Product]:
         print(f"Elasticsearch search error: {es_err}")
 
     # 2. Database Fallback (PostgreSQL ILIKE search)
-    hint = _extract_product_hint(message)
+    hint = _extract_product_hint(search_query)
     filters = [Product.status == "active"]
     if hint:
         like_value = f"%{hint}%"
         filters.append(or_(Product.name.ilike(like_value), Product.description.ilike(like_value)))
     else:
-        tokens = [token for token in re.split(r"[^a-z0-9]+", message.lower()) if len(token) > 2]
+        tokens = [token for token in re.split(r"[^a-z0-9]+", search_query.lower()) if len(token) > 2]
         if not tokens:
             return []
         filters.append(or_(*[
@@ -493,6 +513,14 @@ Your goal is to assist customers with product information, order details, shippi
 
 Follow these strict formatting and presentation rules:
 
+## Multilingual Support
+- Detect the language of the user's message automatically (specifically Arabic, English, or Turkish).
+- Respond in the exact same language used by the customer.
+- Translate all labels, product display names, descriptions, colors, sizes, coupon details, order status, and metadata naturally into the detected language.
+- For example, if the user asks in Arabic, all text, including fields like "Product Name", "Price", "Available Sizes", "Color", and error messages, must be fully in Arabic.
+- If the user asks in Turkish, respond completely in Turkish (e.g., "Ürün Adı", "Fiyat", "Mevcut Bedenler", "Renk").
+- If no matching products are found, respond with the translated equivalent of "No matching products were found" in the user's language (e.g. "Aradığınız kriterlere uygun ürün bulunamadı." for Turkish, or "لم يتم العثور على منتجات مطابقة." for Arabic).
+
 ## Response Formatting Rules
 - Do NOT use any Markdown formatting in customer-facing responses.
 - Do NOT use:
@@ -545,7 +573,7 @@ Follow these strict formatting and presentation rules:
 ## Hallucination Prevention
 - Only show products returned by the database.
 - Never invent products, prices, discounts, colors, sizes, or availability.
-- If the user is searching or asking for products, and no matching products are found in the database context, respond exactly with:
+- If the user is searching or asking for products, and no matching products are found in the database context, respond exactly with the translated equivalent of:
   "No matching products were found."
 
 ## Product Recommendation Rules
@@ -618,6 +646,11 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
                         f"  Description: {p['description'] or 'No description'}"
                     )
                 context_parts.append("\n".join(prod_context))
+            else:
+                context_parts.append(
+                    "PRODUCTS_MATCHING_QUERY:\n"
+                    "- None found in database."
+                )
 
             # C. Coupon Context
             coupons = _valid_coupon_query(db, limit=5)
