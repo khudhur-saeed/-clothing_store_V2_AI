@@ -88,13 +88,15 @@ def _extract_coupon_code(message: str) -> Optional[str]:
 
 def _extract_product_hint(message: str) -> Optional[str]:
     lowered = message.lower()
+    # NOTE: Do NOT add clothing/fashion words (shirt, dress, pants, shoes, etc.) to this list —
+    # they are the actual search terms users type when looking for products.
     stop_words = {
         "what", "is", "the", "price", "of", "for", "my", "show", "me", "product",
         "products", "size", "sizes", "color", "colors", "stock", "inventory", "available",
-        "available", "details", "detail", "about", "tell", "me", "this", "that", "item",
-        "items", "variant", "variants", "dress", "shirt", "pants", "shoes", "top", "bottom",
-        "outerwear", "accessories", "coupon", "code", "order", "orders", "track", "tracking",
-        "shipping", "address", "status", "delivery", "refund", "coupon", "discount", "promo",
+        "details", "detail", "about", "tell", "this", "that", "item",
+        "items", "variant", "variants", "coupon", "code", "order", "orders", "track", "tracking",
+        "shipping", "address", "status", "delivery", "refund", "discount", "promo",
+        "can", "you", "do", "have", "any", "some", "want", "need", "looking", "find", "get", "a", "an", "in",
     }
     tokens = [token for token in re.split(r"[^a-z0-9]+", lowered) if token and token not in stop_words]
     if not tokens:
@@ -102,6 +104,61 @@ def _extract_product_hint(message: str) -> Optional[str]:
     if len(tokens) > 4:
         tokens = tokens[:4]
     return " ".join(tokens)
+
+
+# Maps every color alias (TR / AR / common English) → canonical English color name
+# The canonical name is what gets matched against ProductVariant.color (case-insensitive).
+COLOR_ALIASES: dict[str, str] = {
+    # Turkish
+    "mavi": "blue", "lacivert": "blue",  # lacivert=navy, but treat as blue for search
+    "kırmızı": "red", "beyaz": "white",
+    "siyah": "black", "yeşil": "green", "sarı": "yellow", "mor": "purple",
+    "turuncu": "orange", "pembe": "pink", "gri": "gray", "kahverengi": "brown",
+    "bej": "beige", "krem": "cream", "bordo": "burgundy", "ekru": "ecru",
+    "haki": "khaki", "turkuaz": "turquoise", "lila": "lilac", "fuşya": "fuchsia",
+    "açık mavi": "light blue", "koyu mavi": "dark blue", "açık gri": "light gray",
+    "koyu gri": "dark gray",
+    # Arabic
+    "أزرق": "blue", "أحمر": "red", "أبيض": "white", "أسود": "black",
+    "أخضر": "green", "أصفر": "yellow", "بنفسجي": "purple", "برتقالي": "orange",
+    "وردي": "pink", "رمادي": "gray", "بني": "brown", "كحلي": "navy",
+    "بيج": "beige", "تركواز": "turquoise",
+    # English (canonical + common variants)
+    "blue": "blue", "navy": "navy", "red": "red", "white": "white",
+    "black": "black", "green": "green", "yellow": "yellow", "purple": "purple",
+    "orange": "orange", "pink": "pink", "gray": "gray", "grey": "gray",
+    "brown": "brown", "beige": "beige", "cream": "cream", "burgundy": "burgundy",
+    "khaki": "khaki", "turquoise": "turquoise", "lilac": "lilac", "fuchsia": "fuchsia",
+    "dark blue": "dark blue", "light blue": "light blue", "dark gray": "dark gray",
+    "light gray": "light gray", "off white": "off white", "olive": "olive",
+    "coral": "coral", "maroon": "maroon", "teal": "teal", "indigo": "indigo",
+    "violet": "violet", "gold": "gold", "silver": "silver", "camel": "camel",
+    "charcoal": "charcoal", "mint": "mint", "lavender": "lavender",
+    "rose": "rose", "salmon": "salmon", "cyan": "cyan", "magenta": "magenta",
+}
+
+
+# Pre-build canonical → [all aliases] map so we can search ALL synonyms at once
+# This is crucial because product variant colors may be stored in any language.
+_CANONICAL_TO_ALIASES: dict[str, list[str]] = {}
+for _alias, _canonical in COLOR_ALIASES.items():
+    _CANONICAL_TO_ALIASES.setdefault(_canonical, []).append(_alias)
+
+
+def _extract_color_hint(message: str) -> Optional[list]:
+    """Return ALL color aliases for the color detected in the message, or None.
+
+    Because colors are embedded in product names (e.g. '...Beyaz T-shirt'),
+    we return every alias for the detected color so we can ILIKE-search them
+    all in Product.name / Product.description.
+    """
+    lowered = message.lower()
+    # Try multi-word aliases first (e.g. "açık mavi", "dark blue")
+    for alias in sorted(COLOR_ALIASES, key=len, reverse=True):
+        if alias in lowered:
+            canonical = COLOR_ALIASES[alias]
+            return _CANONICAL_TO_ALIASES.get(canonical, [canonical])
+    return None
 
 
 def _is_order_request(message: str) -> bool:
@@ -121,7 +178,23 @@ def _is_address_request(message: str) -> bool:
 
 def _is_product_request(message: str) -> bool:
     lowered = message.lower()
-    return any(keyword in lowered for keyword in ["product", "price", "size", "sizes", "color", "colors", "stock", "inventory", "available"])
+    product_keywords = [
+        # Meta/attribute words
+        "product", "price", "size", "sizes", "color", "colors", "stock", "inventory", "available",
+        # Clothing categories
+        "shirt", "t-shirt", "tshirt", "tee", "blouse", "top", "tops",
+        "dress", "skirt", "pants", "trousers", "jeans", "shorts",
+        "jacket", "coat", "hoodie", "sweater", "sweatshirt", "cardigan",
+        "shoes", "sneakers", "boots", "sandals", "heels", "loafers",
+        "bag", "handbag", "accessory", "accessories", "hat", "scarf", "belt",
+        "underwear", "lingerie", "swimwear", "activewear", "sportswear",
+        "outfit", "clothing", "clothes", "fashion", "wear", "collection",
+        # Turkish clothing words
+        "gömlek", "tişört", "pantolon", "elbise", "ayakkabı", "mont", "ceket",
+        # Arabic clothing words
+        "قميص", "بنطلون", "فستان", "حذاء", "جاكيت", "ملابس",
+    ]
+    return any(keyword in lowered for keyword in product_keywords)
 
 
 def _product_image_url(variant: ProductVariant) -> str:
@@ -136,13 +209,30 @@ def _product_image_url(variant: ProductVariant) -> str:
     return ""
 
 
-def _format_product_result(product: Product, variants: List[ProductVariant]) -> dict:
+def _format_product_result(product: Product, variants: List[ProductVariant], color_filter: Optional[list] = None) -> dict:
+    """Format a product for the chat response.
+
+    When *color_filter* is a list of color aliases (e.g. ``['beyaz', 'white', ...]``),
+    only variants whose color matches ANY of those aliases (case-insensitive) are shown,
+    and the primary image is taken from those filtered variants.
+    """
+    # Decide which variants to expose
+    if color_filter:
+        filtered_variants = [
+            v for v in variants
+            if v.color and any(alias.lower() in v.color.lower() for alias in color_filter)
+        ]
+        # Fall back to all variants if none match
+        display_variants = filtered_variants if filtered_variants else variants
+    else:
+        display_variants = variants
+
     variant_rows = []
     colors = []
     sizes = []
     total_stock = 0
 
-    for variant in variants:
+    for variant in display_variants:
         stock = max(int(variant.stock or 0), 0)
         total_stock += stock
         if variant.color and variant.color not in colors:
@@ -185,8 +275,10 @@ def _translate_query_to_keywords(message: str) -> str:
     try:
         model = genai.GenerativeModel("gemini-2.5-flash")
         prompt = (
-            "You are a translation assistant for an e-commerce search engine. "
-            "Translate the following user search query into simple, space-separated fashion keywords in Turkish and English. "
+            "You are a translation assistant for a Turkish e-commerce search engine. "
+            "Translate the following user search query into simple, space-separated fashion keywords ONLY in Turkish. "
+            "For loanwords commonly used in Turkish retail (like t-shirt, sweatshirt), include them. "
+            "Do NOT add English translations (e.g., do not add 'shirt' if the word is 'gömlek'). "
             "Output ONLY the translated keywords, with no explanation or punctuation. "
             f"Query: {message}"
         )
@@ -198,44 +290,116 @@ def _translate_query_to_keywords(message: str) -> str:
         return message
 
 
-def _find_products(db: Session, message: str, limit: int = 3) -> List[Product]:
+def _find_products(db: Session, message: str, limit: int = 3) -> tuple[list, Optional[list]]:
+    """Return (products, color_filter) where color_filter is the list of color aliases or None.
+
+    IMPORTANT: ProductVariant.color stores HEX codes (e.g. '#FFFFFF'), NOT text.
+    Color words are embedded in Product.name (e.g. '...Beyaz T-shirt').
+    Therefore ALL color matching is done against Product.name / description.
+    """
+    # Detect color from the original user message BEFORE translation
+    color_filter = _extract_color_hint(message)
+    print(f"[chat search] message={message!r}  color_filter={color_filter}")
+
     # Translate query to fashion-focused English/Turkish keywords
     search_query = _translate_query_to_keywords(message)
+    print(f"[chat search] translated={search_query!r}")
 
-    # 1. Try to search using Elasticsearch
+    # Flat set of every known color alias word — stripped from keyword tokens
+    # because color_filter already handles color matching.
+    all_color_words: set = set(COLOR_ALIASES.keys())
+
+    def _non_color_tokens(raw: str) -> list:
+        """Split raw string into tokens, dropping pure color alias words.
+        Minimum length 3 to avoid Turkish character-split fragments (e.g. 'ti', 'rt' from 'tişört').
+        """
+        return [
+            t for t in re.split(r"[^a-z0-9]+", raw.lower())
+            if len(t) > 2 and t not in all_color_words
+        ]
+
+    def _token_match(token: str):
+        """Match token in product name or description, ignoring spaces and hyphens."""
+        from sqlalchemy import func
+        clean_name = func.replace(func.replace(Product.name, '-', ''), ' ', '')
+        clean_desc = func.replace(func.replace(Product.description, '-', ''), ' ', '')
+        return or_(
+            clean_name.ilike(f"%{token}%"),
+            clean_desc.ilike(f"%{token}%"),
+        )
+
+    def _color_name_match():
+        """OR filter: any color alias appears in product name or description."""
+        return or_(*[
+            or_(
+                Product.name.ilike(f"%{c}%"),
+                Product.description.ilike(f"%{c}%"),
+            )
+            for c in color_filter
+        ])
+
+    # Build keyword tokens from the translated query (type words like "shirt", "pantolon")
+    # Fall back to the ORIGINAL message if the translation produces only short fragments
+    # (e.g. Gemini translates "white t shirt" → "beyaz tişört\nwhite t shirt" and the
+    # Turkish "tişört" splits into unusable 'ti'/'rt' fragments).
+    hint = _extract_product_hint(search_query)
+    if hint:
+        kw_tokens = _non_color_tokens(hint)
+    else:
+        kw_tokens = _non_color_tokens(search_query)
+
+    if not kw_tokens:
+        # Translation tokens were all too short — try the original message directly
+        kw_tokens = _non_color_tokens(message)
+    print(f"[chat search] kw_tokens={kw_tokens}")
+
+    # ── 1. Try Elasticsearch ──────────────────────────────────────────────────
     try:
         from app.core.search import search_products, _is_es_available
         if _is_es_available():
             es_ids = search_products(search_query)
+            print(f"[chat search] ES ids={es_ids}")
             if es_ids:
                 id_order = {id_: index for index, id_ in enumerate(es_ids)}
-                products = (
+                base_q = (
                     db.query(Product)
                     .filter(Product.product_id.in_(es_ids), Product.status == "active")
-                    .all()
                 )
+                # Apply keyword filter so product TYPE is enforced (not just color)
+                if kw_tokens:
+                    base_q = base_q.filter(or_(*[_token_match(t) for t in kw_tokens[:4]]))
+                if color_filter:
+                    # Filter by color in the product NAME (not variant hex)
+                    base_q = base_q.filter(_color_name_match())
+                products = base_q.all()
                 products.sort(key=lambda p: id_order.get(p.product_id, 9999))
-                return products[:limit]
+                products = products[:limit]
+                print(f"[chat search] ES results: {[p.name for p in products]}")
+                if products:
+                    return products, color_filter
+                # ES found IDs but filters returned 0 — fall through to DB
+                print("[chat search] ES filters returned empty, falling back to DB search")
     except Exception as es_err:
-        print(f"Elasticsearch search error: {es_err}")
+        print(f"[chat search] Elasticsearch error: {es_err}")
 
-    # 2. Database Fallback (PostgreSQL ILIKE search)
-    hint = _extract_product_hint(search_query)
-    filters = [Product.status == "active"]
-    if hint:
-        like_value = f"%{hint}%"
-        filters.append(or_(Product.name.ilike(like_value), Product.description.ilike(like_value)))
-    else:
-        tokens = [token for token in re.split(r"[^a-z0-9]+", search_query.lower()) if len(token) > 2]
-        if not tokens:
-            return []
-        filters.append(or_(*[
-            Product.name.ilike(f"%{token}%")
-            for token in tokens[:4]
-        ]))
+    # ── 2. Database Fallback (PostgreSQL ILIKE) ───────────────────────────────
+    print(f"[chat search] DB fallback  hint={hint!r}")
+    base_query = db.query(Product).filter(Product.status == "active")
 
-    query = db.query(Product).filter(*filters)
-    return query.limit(limit).all()
+    if kw_tokens:
+        base_query = base_query.filter(or_(*[_token_match(t) for t in kw_tokens[:4]]))
+    elif not color_filter:
+        print("[chat search] no usable tokens and no color — returning empty")
+        return [], color_filter
+    # else: only a color was given — color_filter block below handles it
+
+    if color_filter:
+        # Colors live in product names — search aliases in name/description.
+        base_query = base_query.filter(_color_name_match())
+
+    results = base_query.distinct().limit(limit).all()
+    print(f"[chat search] DB results: {[p.name for p in results]}")
+    return results, color_filter
 
 
 def _find_order_for_user(db: Session, current_user, message: str) -> Optional[Order]:
@@ -337,7 +501,7 @@ def _serialize_coupon_for_chat(coupon: Coupon) -> dict:
 
 
 def _respond_with_products(db: Session, message: str) -> dict:
-    products = _find_products(db, message, limit=3)
+    products, color_filter = _find_products(db, message, limit=3)
     if not products:
         return {
             "response": VERIFICATION_FALLBACK,
@@ -348,7 +512,7 @@ def _respond_with_products(db: Session, message: str) -> dict:
     response_lines = ["I found these products in the store database:"]
     for product in products:
         variants = db.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
-        payload = _format_product_result(product, variants)
+        payload = _format_product_result(product, variants, color_filter=color_filter)
         product_payloads.append(payload)
 
         size_text = ", ".join(payload["sizes"]) if payload["sizes"] else "no sizes recorded"
@@ -600,12 +764,12 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
             }
 
         # Retrieve dynamic product list from database based on search/query
-        products = _find_products(db, message, limit=4)
+        products, color_filter = _find_products(db, message, limit=4)
         product_payloads = []
         if products:
             for product in products:
                 variants = db.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
-                payload = _format_product_result(product, variants)
+                payload = _format_product_result(product, variants, color_filter=color_filter)
                 product_payloads.append(payload)
 
         # Try to call Gemini first for a friendly, context-rich response
