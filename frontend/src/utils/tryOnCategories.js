@@ -40,6 +40,7 @@ function normalizeStr(str) {
 const BLOCKED_PIECE_TYPES = new Set([
     'shoes',
     'footwear',
+    'accessories',
 ]);
 
 /**
@@ -91,6 +92,11 @@ const TRY_ON_BLOCKED_KEYWORDS = [
     'sock',
     'socks',
     'çorap',         // Turkish: socks
+
+    // ── Accessories ──────────────────────────────────────────────────────────
+    'accessory',
+    'accessories',
+    'aksesuar',      // Turkish: accessory
 ];
 
 /**

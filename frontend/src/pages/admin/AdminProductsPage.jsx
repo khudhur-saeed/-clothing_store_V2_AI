@@ -35,7 +35,7 @@ const emptyVariant = () => ({
 });
 
 // Empty size option for the nested table
-const emptySizeOption = () => ({ size: 'M', stock: '', price: '', sizeErrors: {} });
+const emptySizeOption = (isShoes = false) => ({ size: isShoes ? '38' : 'M', stock: '', price: '', sizeErrors: {} });
 
 const groupFlatVariantsByColor = (rows, fallbackPrice = '') => {
     const grouped = new Map();
@@ -233,9 +233,13 @@ export default function AdminProductsPage() {
         setVField(vIdx, 'images', variants[vIdx].images.filter((_, i) => i !== imgIdx));
 
     const addSizeOptionToVariant = (vIdx) => {
+        const cName = categoryOptions.find(c => String(c?.id) === String(form?.categoryId))?.name;
+        const safeName = String(cName || '').toLowerCase();
+        const isShoes = form?.pieceType === 'Shoes' || safeName.includes('ayakkabı') || safeName.includes('shoes');
+
         setVariants(prev => prev.map((v, i) => {
             if (i !== vIdx) return v;
-            return { ...v, sizeOptions: [...v.sizeOptions, emptySizeOption()] };
+            return { ...v, sizeOptions: [...v.sizeOptions, emptySizeOption(isShoes)] };
         }));
     };
 
@@ -511,9 +515,14 @@ export default function AdminProductsPage() {
                                 </div>
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                                    {variants.map((v, idx) => (
-                                        <VariantCard key={idx} pieceType={form.pieceType} v={v} vIdx={idx} canRemove={variants.length > 1} onUpdate={(key, val) => setVField(idx, key, val)} onAddImage={() => addImageToVariant(idx)} onRemoveImage={(imgIdx) => removeImage(idx, imgIdx)} onRemove={() => removeVariantRow(idx)} onAddSizeOption={() => addSizeOptionToVariant(idx)} onRemoveSizeOption={(soIdx) => removeSizeOptionFromVariant(idx, soIdx)} onUpdateSizeOption={(soIdx, key, val) => setSizeOptionField(idx, soIdx, key, val)} />
-                                    ))}
+                                    {variants.map((v, idx) => {
+                                        const cName = categoryOptions.find(c => String(c?.id) === String(form?.categoryId))?.name;
+                                        const safeName = String(cName || '').toLowerCase();
+                                        const isShoes = form?.pieceType === 'Shoes' || safeName.includes('ayakkabı') || safeName.includes('shoes');
+                                        return (
+                                            <VariantCard key={idx} pieceType={form?.pieceType} isShoes={isShoes} v={v} vIdx={idx} canRemove={variants.length > 1} onUpdate={(key, val) => setVField(idx, key, val)} onAddImage={() => addImageToVariant(idx)} onRemoveImage={(imgIdx) => removeImage(idx, imgIdx)} onRemove={() => removeVariantRow(idx)} onAddSizeOption={() => addSizeOptionToVariant(idx)} onRemoveSizeOption={(soIdx) => removeSizeOptionFromVariant(idx, soIdx)} onUpdateSizeOption={(soIdx, key, val) => setSizeOptionField(idx, soIdx, key, val)} />
+                                        );
+                                    })}
                                 </div>
 
                                 {variants.length >= 1 && (
@@ -537,14 +546,14 @@ export default function AdminProductsPage() {
     );
 }
 
-function VariantCard({ pieceType, v, vIdx, canRemove, onUpdate, onAddImage, onRemoveImage, onRemove, onAddSizeOption, onRemoveSizeOption, onUpdateSizeOption }) {
+function VariantCard({ pieceType, isShoes, v, vIdx, canRemove, onUpdate, onAddImage, onRemoveImage, onRemove, onAddSizeOption, onRemoveSizeOption, onUpdateSizeOption }) {
     const [collapsed, setCollapsed] = useState(false);
     const isCustomColor = v.color && !PRESET_COLORS.some(c => c.hex === v.color);
     const hasErrors = Object.keys(v.errors || {}).length > 0;
 
     const CLOTHING_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'];
     const SHOE_SIZES = Array.from({ length: 15 }, (_, i) => String(35 + i)); // 35 to 49
-    const sizeOptionsList = pieceType === 'Shoes' ? SHOE_SIZES : CLOTHING_SIZES;
+    const sizeOptionsList = isShoes ? SHOE_SIZES : CLOTHING_SIZES;
 
     return (
         <div style={{ border: hasErrors ? '1.5px solid var(--clr-error)' : '1px solid var(--clr-border)', borderRadius: 'var(--r-lg)', overflow: 'hidden', background: 'var(--clr-surface)' }}>

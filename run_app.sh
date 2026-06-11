@@ -28,7 +28,7 @@ docker compose up -d
 echo "[+] Starting Backend (FastAPI)..."
 cd backend || exit
 source venv/bin/activate
-python3 -m uvicorn app.main:app --reload &
+python3 -m uvicorn app.main:app --host 0.0.0.0 --reload &
 BACKEND_PID=$!
 cd ..
 
@@ -41,8 +41,8 @@ cd ..
 
 echo "=================================================="
 echo "🚀 App is running!"
-echo "📡 Backend URL: http://localhost:8000"
-echo "🌐 Frontend URL: http://localhost:5173"
+echo "📡 Backend URL: http://localhost:8000 (and on your local network IP)"
+echo "🌐 Frontend URL: http://localhost:5173 (and on your local network IP)"
 echo "🛑 Press Ctrl+C to stop all services."
 echo "=================================================="
 

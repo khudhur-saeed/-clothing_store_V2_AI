@@ -97,8 +97,12 @@ def _extract_product_hint(message: str) -> Optional[str]:
         "items", "variant", "variants", "coupon", "code", "order", "orders", "track", "tracking",
         "shipping", "address", "status", "delivery", "refund", "discount", "promo",
         "can", "you", "do", "have", "any", "some", "want", "need", "looking", "find", "get", "a", "an", "in",
+        # Turkish conversational stop words
+        "var", "yok", "mı", "mi", "mu", "mü", "bana", "göster", "olan", "istiyorum",
+        "bul", "fiyat", "fiyatı", "renk", "beden", "stok", "detay", "hakkında", "bu",
+        "şu", "o", "ürün", "ürünler", "indirim", "kod", "sipariş", "kargo", "adres"
     }
-    tokens = [token for token in re.split(r"[^a-z0-9]+", lowered) if token and token not in stop_words]
+    tokens = [token for token in re.split(r"[^a-z0-9ıiöouügğşscç]+", lowered) if token and token not in stop_words]
     if not tokens:
         return None
     if len(tokens) > 4:
@@ -277,6 +281,7 @@ def _translate_query_to_keywords(message: str) -> str:
         prompt = (
             "You are a translation assistant for a Turkish e-commerce search engine. "
             "Translate the following user search query into simple, space-separated fashion keywords ONLY in Turkish. "
+            "CRITICAL: You MUST correct any spelling mistakes in Turkish fashion terms (e.g., correct 'pantalon' to 'pantolon', 'tşört' to 'tişört', 'eşortman' to 'eşofman'). "
             "For loanwords commonly used in Turkish retail (like t-shirt, sweatshirt), include them. "
             "Do NOT add English translations (e.g., do not add 'shirt' if the word is 'gömlek'). "
             "Output ONLY the translated keywords, with no explanation or punctuation. "
@@ -314,7 +319,7 @@ def _find_products(db: Session, message: str, limit: int = 3) -> tuple[list, Opt
         Minimum length 3 to avoid Turkish character-split fragments (e.g. 'ti', 'rt' from 'tişört').
         """
         return [
-            t for t in re.split(r"[^a-z0-9]+", raw.lower())
+            t for t in re.split(r"[^a-z0-9ıiöouügğşscç]+", raw.lower())
             if len(t) > 2 and t not in all_color_words
         ]
 

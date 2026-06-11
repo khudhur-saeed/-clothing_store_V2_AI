@@ -66,10 +66,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Moda Clothing Store API", version="1.0.0", lifespan=lifespan)
 
-# Allow the React frontend (port 5173 and 5174) to call this backend (port 8000)
+# Allow the React frontend (port 5173 and 5174) to call this backend (port 8000) from any IP
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origin_regex=r"http://.*:517[34]", # allows access from local network IPs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
