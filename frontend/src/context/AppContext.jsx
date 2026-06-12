@@ -3,21 +3,32 @@ import { apiCall } from '../api/client';
 
 const AppContext = createContext(null);
 
-const normalizePersistedOutfit = (o) => ({
-    outfit_id: o.outfit_id ?? o.id,
-    user_id: o.user_id ?? o.userId,
-    name: o.name,
-    description: o.description,
-    visibility: o.visibility || (o.isPublic ? 'public' : 'private'),
-    department: o.department,
-    target_category_id: o.target_category_id ?? o.targetCategoryId ?? o.category_id ?? null,
-    targetCategoryId: o.targetCategoryId ?? o.target_category_id ?? o.category_id ?? null,
-    products: o.products || o.items || [],
-    slotMap: o.slotMap || {},
-    created_at: o.created_at || o.createdAt,
-    updated_at: o.updated_at,
-    isSaved: true,
-});
+const normalizePersistedOutfit = (o) => {
+    const selectedVariants = {};
+    if ((o.products || o.items) && o.variant_ids) {
+        const pids = o.products || o.items;
+        pids.forEach((pid, i) => {
+            if (o.variant_ids[i]) selectedVariants[pid] = o.variant_ids[i];
+        });
+    }
+    
+    return {
+        outfit_id: o.outfit_id ?? o.id,
+        user_id: o.user_id ?? o.userId,
+        name: o.name,
+        description: o.description,
+        visibility: o.visibility || (o.isPublic ? 'public' : 'private'),
+        department: o.department,
+        target_category_id: o.target_category_id ?? o.targetCategoryId ?? o.category_id ?? null,
+        targetCategoryId: o.targetCategoryId ?? o.target_category_id ?? o.category_id ?? null,
+        products: o.products || o.items || [],
+        selectedVariants,
+        slotMap: o.slotMap || {},
+        created_at: o.created_at || o.createdAt,
+        updated_at: o.updated_at,
+        isSaved: true,
+    };
+};
 
 export function AppProvider({ children }) {
     const [favorites, setFavorites] = useState([]);
@@ -247,16 +258,18 @@ export function AppProvider({ children }) {
     };
 
 
-    const addToOutfit = (outfitId, productId, pieceType = null, replaceProductId = null) => {
+    const addToOutfit = (outfitId, productId, pieceType = null, replaceProductId = null, variantId = null) => {
         setOutfits(prev => prev.map(o => {
             if (o.outfit_id !== outfitId) return o;
 
             let nextProducts = [...o.products];
             const nextSlotMap = { ...(o.slotMap || {}) };
+            const nextSelectedVariants = { ...(o.selectedVariants || {}) };
 
             // Remove the product being explicitly replaced (slot swap)
             if (replaceProductId && replaceProductId !== productId) {
                 nextProducts = nextProducts.filter(id => id !== replaceProductId);
+                delete nextSelectedVariants[replaceProductId];
                 // Also clear from slotMap if it was mapped there
                 for (const [slot, id] of Object.entries(nextSlotMap)) {
                     if (id === replaceProductId) delete nextSlotMap[slot];
@@ -266,26 +279,33 @@ export function AppProvider({ children }) {
             // If a pieceType is provided and the slot already has a different product, replace it
             if (pieceType && nextSlotMap[pieceType] && nextSlotMap[pieceType] !== productId) {
                 nextProducts = nextProducts.filter(id => id !== nextSlotMap[pieceType]);
+                delete nextSelectedVariants[nextSlotMap[pieceType]];
                 delete nextSlotMap[pieceType];
             }
 
-            // Already in this exact slot — no-op
-            if (pieceType && nextSlotMap[pieceType] === productId) {
+            // Already in this exact slot — no-op if same variant
+            if (pieceType && nextSlotMap[pieceType] === productId && nextSelectedVariants[productId] === variantId) {
                 return o;
             }
 
             // Avoid exact duplicate (same product, same slot or no slot)
-            if (!pieceType && nextProducts.includes(productId)) {
+            if (!pieceType && nextProducts.includes(productId) && nextSelectedVariants[productId] === variantId) {
                 return o;
             }
 
-            nextProducts.push(productId);
+            if (!nextProducts.includes(productId)) {
+                nextProducts.push(productId);
+            }
 
             if (pieceType) {
                 nextSlotMap[pieceType] = productId;
             }
+            
+            if (variantId) {
+                nextSelectedVariants[productId] = variantId;
+            }
 
-            return { ...o, products: nextProducts, slotMap: nextSlotMap };
+            return { ...o, products: nextProducts, slotMap: nextSlotMap, selectedVariants: nextSelectedVariants };
         }));
     };
 

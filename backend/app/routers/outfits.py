@@ -22,10 +22,12 @@ def serialize_outfit(db: Session, outfit: Outfit, include_creator: bool = False)
     
     # Convert variant_ids to product_ids by querying ProductVariant table
     product_ids = []
+    variant_ids = []
     for op in outfit_products:
         variant = db.query(ProductVariant).filter(ProductVariant.variant_id == op.variant_id).first()
         if variant:
             product_ids.append(variant.product_id)
+            variant_ids.append(variant.variant_id)
     
     item_ids = product_ids  # Frontend expects product_ids, not variant_ids
 
@@ -39,6 +41,7 @@ def serialize_outfit(db: Session, outfit: Outfit, include_creator: bool = False)
         "id": outfit.outfit_id,
         "userId": outfit.user_id,
         "items": item_ids,
+        "variant_ids": variant_ids,
         "isPublic": outfit.visibility == "public",
         "createdAt": outfit.created_at,
         "outfit_id": outfit.outfit_id,
@@ -144,21 +147,31 @@ def create_outfit(
     variant_ids = []
     invalid_pids = []
     
-    for pid in outfit_data.product_ids:
-        product = db.query(Product).filter(Product.product_id == pid).first()
-        if not product:
-            print(f"   ⚠️  Product {pid} not found, skipping")
-            invalid_pids.append(pid)
-            continue
-        
-        # Get the first variant for this product
-        variant = db.query(ProductVariant).filter(ProductVariant.product_id == pid).first()
-        if not variant:
-            print(f"   ⚠️  Product {pid} has no variants, skipping")
-            invalid_pids.append(pid)
-            continue
-        
-        variant_ids.append(variant.variant_id)
+    if outfit_data.variant_ids:
+        # If frontend sent explicit variant IDs (color selection)
+        for vid in outfit_data.variant_ids:
+            variant = db.query(ProductVariant).filter(ProductVariant.variant_id == vid).first()
+            if variant:
+                variant_ids.append(vid)
+            else:
+                invalid_pids.append(vid)
+    elif outfit_data.product_ids:
+        # Fallback to the old behavior: get the first variant for each product
+        for pid in outfit_data.product_ids:
+            product = db.query(Product).filter(Product.product_id == pid).first()
+            if not product:
+                print(f"   ⚠️  Product {pid} not found, skipping")
+                invalid_pids.append(pid)
+                continue
+            
+            # Get the first variant for this product
+            variant = db.query(ProductVariant).filter(ProductVariant.product_id == pid).first()
+            if not variant:
+                print(f"   ⚠️  Product {pid} has no variants, skipping")
+                invalid_pids.append(pid)
+                continue
+            
+            variant_ids.append(variant.variant_id)
 
     if invalid_pids:
         print(f"   ⚠️  Skipped {len(invalid_pids)} invalid products: {invalid_pids}")
@@ -223,27 +236,34 @@ def update_outfit(
 
     outfit.updated_at = datetime.utcnow()
 
-    if outfit_data.product_ids is not None:
-        print(f"   Product IDs received: {outfit_data.product_ids}")
+    if outfit_data.product_ids is not None or outfit_data.variant_ids is not None:
         # Validate products and collect valid variant IDs
         variant_ids = []
         invalid_pids = []
         
-        for pid in outfit_data.product_ids:
-            product = db.query(Product).filter(Product.product_id == pid).first()
-            if not product:
-                print(f"   ⚠️  Product {pid} not found, skipping")
-                invalid_pids.append(pid)
-                continue
-            
-            # Get the first variant for this product
-            variant = db.query(ProductVariant).filter(ProductVariant.product_id == pid).first()
-            if not variant:
-                print(f"   ⚠️  Product {pid} has no variants, skipping")
-                invalid_pids.append(pid)
-                continue
-            
-            variant_ids.append(variant.variant_id)
+        if outfit_data.variant_ids is not None:
+            for vid in outfit_data.variant_ids:
+                variant = db.query(ProductVariant).filter(ProductVariant.variant_id == vid).first()
+                if variant:
+                    variant_ids.append(vid)
+                else:
+                    invalid_pids.append(vid)
+        elif outfit_data.product_ids is not None:
+            for pid in outfit_data.product_ids:
+                product = db.query(Product).filter(Product.product_id == pid).first()
+                if not product:
+                    print(f"   ⚠️  Product {pid} not found, skipping")
+                    invalid_pids.append(pid)
+                    continue
+                
+                # Get the first variant for this product
+                variant = db.query(ProductVariant).filter(ProductVariant.product_id == pid).first()
+                if not variant:
+                    print(f"   ⚠️  Product {pid} has no variants, skipping")
+                    invalid_pids.append(pid)
+                    continue
+                
+                variant_ids.append(variant.variant_id)
 
         if invalid_pids:
             print(f"   ⚠️  Skipped {len(invalid_pids)} invalid products: {invalid_pids}")

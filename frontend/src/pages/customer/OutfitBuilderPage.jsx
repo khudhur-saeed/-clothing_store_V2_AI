@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { apiCall } from '../../api/client';
 
-const PIECE_TYPES = ['Tops', 'Bottoms', 'Outerwear', 'Shoes', 'Accessories'];
+const PIECE_TYPES = ['Tops', 'Bottoms', 'Outerwear', 'Shoes'];
 const VALID_DEPARTMENTS = ['Men', 'Women'];
 
 const sanitizeDepartment = (value) => {
@@ -302,7 +302,7 @@ export default function OutfitBuilderPage() {
         setFilteredProducts([]);
     };
 
-    const handleAddToActiveSlot = (product) => {
+    const handleAddToActiveSlot = (product, variantId = null) => {
         if (!currentOutfit || !activeSlot) return;
 
         const productPieceType = getPieceType(product);
@@ -316,7 +316,8 @@ export default function OutfitBuilderPage() {
             currentOutfit.outfit_id,
             product.product_id,
             activeSlot,
-            existing?.product_id || null
+            existing?.product_id || null,
+            variantId
         );
 
         if (existing && existing.product_id !== product.product_id) {
@@ -324,7 +325,7 @@ export default function OutfitBuilderPage() {
         } else if (!existing) {
             showToast(`${activeSlot} added`, 'success');
         } else {
-            showToast(`${activeSlot} already selected`, 'info');
+            showToast(`Variant updated for ${activeSlot}`, 'success');
         }
     };
 
@@ -382,6 +383,14 @@ export default function OutfitBuilderPage() {
         try {
             // Build clean product_ids array - only valid product IDs
             const productIds = (currentOutfit.products || []).filter(id => id != null && id !== '');
+            // Always resolve a variant for each product: use the selected color variant if available,
+            // otherwise fall back to the first variant so the correct color image is sent to AI generation.
+            const variantIds = productIds.map(pid => {
+                const selected = currentOutfit.selectedVariants?.[pid];
+                if (selected) return selected;
+                const fallback = (variantsByProductId[pid] || [])[0];
+                return fallback?.variant_id ?? null;
+            }).filter(id => id != null);
 
             const payload = {
                 name: currentOutfit.name,
@@ -389,6 +398,7 @@ export default function OutfitBuilderPage() {
                 visibility: currentOutfit.visibility || 'private',
                 category_id: null,
                 product_ids: productIds,
+                variant_ids: variantIds.length > 0 ? variantIds : undefined,
             };
 
             console.log('📤 Saving outfit with payload:', payload);
@@ -443,6 +453,33 @@ export default function OutfitBuilderPage() {
         }
         setGeneratingImage(true);
         try {
+            // Save the outfit first so the DB has the correct selected variant_ids.
+            // Without this, the backend reads stale variant_ids and uses wrong color images.
+            const productIds = (currentOutfit.products || []).filter(id => id != null && id !== '');
+            const variantIds = productIds.map(pid => {
+                const selected = currentOutfit.selectedVariants?.[pid];
+                if (selected) return selected;
+                const fallback = (variantsByProductId[pid] || [])[0];
+                return fallback?.variant_id ?? null;
+            }).filter(id => id != null);
+
+            const savePayload = {
+                name: currentOutfit.name,
+                description: currentOutfit.description || '',
+                visibility: currentOutfit.visibility || 'private',
+                category_id: null,
+                product_ids: productIds,
+                variant_ids: variantIds.length > 0 ? variantIds : undefined,
+            };
+
+            const outfitId = currentOutfit.outfit_id;
+            if (currentOutfit.isSaved && outfitId) {
+                await apiCall(`/outfits/${outfitId}`, { method: 'PUT' }, savePayload);
+            } else {
+                await apiCall('/outfits/', { method: 'POST' }, savePayload);
+            }
+            await refreshOutfits();
+
             const formData = new FormData();
             formData.append('outfit_id', currentOutfit.outfit_id);
             const res = await fetch('http://localhost:8000/api/ai/generate-outfit-image', {
@@ -495,12 +532,19 @@ export default function OutfitBuilderPage() {
         setSavingOutfit(true);
         try {
             const productIds = (currentOutfit.products || []).filter(id => id != null);
+            const variantIds = productIds.map(pid => {
+                const selected = currentOutfit.selectedVariants?.[pid];
+                if (selected) return selected;
+                const fallback = (variantsByProductId[pid] || [])[0];
+                return fallback?.variant_id ?? null;
+            }).filter(id => id != null);
             const payload = {
                 name: currentOutfit.name,
                 description: currentOutfit.description || '',
                 visibility: 'private',   // keep private until user confirms
                 category_id: null,
                 product_ids: productIds,
+                variant_ids: variantIds.length > 0 ? variantIds : undefined,
             };
             const outfitId = currentOutfit.outfit_id;
             if (currentOutfit.isSaved && outfitId) {
@@ -552,12 +596,21 @@ export default function OutfitBuilderPage() {
         if (!currentOutfit || !publishImageUrl) return;
         setPublishingSave(true);
         try {
+            const productIds = (currentOutfit.products || []).filter(id => id != null);
+            const variantIds = productIds.map(pid => {
+                const selected = currentOutfit.selectedVariants?.[pid];
+                if (selected) return selected;
+                const fallback = (variantsByProductId[pid] || [])[0];
+                return fallback?.variant_id ?? null;
+            }).filter(id => id != null);
+            
             await apiCall(`/outfits/${currentOutfit.outfit_id}`, { method: 'PUT' }, {
                 name: currentOutfit.name,
                 description: currentOutfit.description || '',
                 visibility: 'public',
                 category_id: null,
-                product_ids: (currentOutfit.products || []).filter(id => id != null),
+                product_ids: productIds,
+                variant_ids: variantIds.length > 0 ? variantIds : undefined,
             });
             await refreshOutfits();
             setGeneratedImageUrl(publishImageUrl);
@@ -742,41 +795,68 @@ export default function OutfitBuilderPage() {
                                 </div>
                             ) : (
                                 <div style={{ display: 'grid', gap: 'var(--sp-3)', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                                    {filteredProducts.map((product) => {
-                                        const variant = variantsByProductId[product.product_id]?.[0];
-                                        const image = variant?.images?.[0];
-                                        const slotName = getPieceType(product) || activeSlot;
-                                        const isCurrent = slotProducts[activeSlot]?.product_id === product.product_id;
+                                    {filteredProducts.flatMap((product) => {
+                                        const variants = variantsByProductId[product.product_id] || [];
+                                        if (variants.length === 0) return [];
 
-                                        return (
-                                            <div key={product.product_id} style={{ background: 'var(--clr-surface-2)', borderRadius: 'var(--r-lg)', border: '1px solid var(--clr-border)', overflow: 'hidden', transition: 'all var(--tr-fast)' }}>
-                                                <div style={{ aspectRatio: '3/4', background: 'var(--clr-bg-2)', overflow: 'hidden' }}>
-                                                    {image ? (
-                                                        <img src={image} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                                    ) : (
-                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--clr-text-3)' }}>
-                                                            <Package size={24} />
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <div style={{ padding: 'var(--sp-3)' }}>
-                                                    <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-2)', lineHeight: '1.4', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{product.name}</div>
-                                                    <div style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>${Number(product.price || 0).toFixed(2)}</div>
-                                                    <div className="badge badge-primary" style={{ marginBottom: 'var(--sp-3)', fontSize: '10px', display: 'inline-flex' }}>
-                                                        <span>{slotName}</span>
+                                        // Deduplicate variants by color so we don't show identical cards for different sizes
+                                        const uniqueColorVariants = [];
+                                        const seenColors = new Set();
+                                        
+                                        for (const variant of variants) {
+                                            const colorKey = variant.color || 'default';
+                                            if (!seenColors.has(colorKey)) {
+                                                seenColors.add(colorKey);
+                                                uniqueColorVariants.push(variant);
+                                            }
+                                        }
+
+                                        return uniqueColorVariants.map((variant) => {
+                                            const image = variant?.images?.[0];
+                                            const slotName = getPieceType(product) || activeSlot;
+                                            
+                                            const isCurrentProduct = slotProducts[activeSlot]?.product_id === product.product_id;
+                                            const selectedVariantId = currentOutfit?.selectedVariants?.[product.product_id];
+                                            const isSelectedVariant = selectedVariantId ? (selectedVariantId === variant.variant_id) : (variant.variant_id === variants[0].variant_id);
+                                            const isCurrent = isCurrentProduct && isSelectedVariant;
+
+                                            return (
+                                                <div key={`${product.product_id}-${variant.variant_id}`} style={{ background: 'var(--clr-surface-2)', borderRadius: 'var(--r-lg)', border: '1px solid var(--clr-border)', overflow: 'hidden', transition: 'all var(--tr-fast)' }}>
+                                                    <div style={{ aspectRatio: '3/4', background: 'var(--clr-bg-2)', overflow: 'hidden' }}>
+                                                        {image ? (
+                                                            <img src={image} alt={`${product.name} - ${variant.color}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                        ) : (
+                                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--clr-text-3)' }}>
+                                                                <Package size={24} />
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleAddToActiveSlot(product)}
-                                                        className={isCurrent ? 'btn btn-sm' : 'btn btn-primary btn-sm'}
-                                                        style={{ width: '100%', justifyContent: 'center', background: isCurrent ? 'var(--clr-success)' : undefined }}
-                                                        disabled={isCurrent}
-                                                    >
-                                                        {isCurrent ? 'In Slot' : `Use`}
-                                                    </button>
+                                                    <div style={{ padding: 'var(--sp-3)' }}>
+                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--clr-text)', marginBottom: 'var(--sp-1)', lineHeight: '1.4', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                                                            {product.name}
+                                                        </div>
+                                                        {variant.color && (
+                                                            <div style={{ fontSize: '11px', color: 'var(--clr-text-2)', marginBottom: 'var(--sp-1)' }}>
+                                                                <span style={{ fontWeight: 500 }}>{variant.color}</span>
+                                                            </div>
+                                                        )}
+                                                        <div style={{ fontSize: '11px', color: 'var(--clr-text-3)', marginBottom: 'var(--sp-2)' }}>${Number(product.price || 0).toFixed(2)}</div>
+                                                        <div className="badge badge-primary" style={{ marginBottom: 'var(--sp-3)', fontSize: '10px', display: 'inline-flex' }}>
+                                                            <span>{slotName}</span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleAddToActiveSlot(product, variant.variant_id)}
+                                                            className={isCurrent ? 'btn btn-sm' : 'btn btn-primary btn-sm'}
+                                                            style={{ width: '100%', justifyContent: 'center', background: isCurrent ? 'var(--clr-success)' : undefined }}
+                                                            disabled={isCurrent}
+                                                        >
+                                                            {isCurrent ? 'In Slot' : `Use`}
+                                                        </button>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        );
+                                            );
+                                        });
                                     })}
                                 </div>
                             )}
@@ -866,7 +946,11 @@ export default function OutfitBuilderPage() {
                                 <div style={{ display: 'grid', gap: 'var(--sp-4)', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
                                     {PIECE_TYPES.map((slot) => {
                                         const selectedProduct = slotProducts[slot] || null;
-                                        const variant = selectedProduct ? variantsByProductId[selectedProduct.product_id]?.[0] : null;
+                                        const allVariants = selectedProduct ? (variantsByProductId[selectedProduct.product_id] || []) : [];
+                                        const selectedVariantId = selectedProduct ? currentOutfit?.selectedVariants?.[selectedProduct.product_id] : null;
+                                        const variant = selectedVariantId
+                                            ? (allVariants.find(v => v.variant_id === selectedVariantId) || allVariants[0])
+                                            : allVariants[0];
                                         const image = variant?.images?.[0];
                                         const isActive = activeSlot === slot;
 

@@ -1072,6 +1072,8 @@ async def generate_outfit_image(
     if not outfit_products:
         raise HTTPException(status_code=400, detail="Outfit has no products")
 
+    print(f"[OutfitGen] Outfit {outfit_id} has {len(outfit_products)} products, variant_ids: {[op.variant_id for op in outfit_products]}")
+
     product_image_data: list[dict] = []   # ordered, one per outfit slot
 
     for op in outfit_products:
@@ -1098,6 +1100,8 @@ async def generate_outfit_image(
         if not image_url:
             continue
 
+        print(f"[OutfitGen]   variant_id={variant.variant_id}, color={variant.color}, product={product.name}, image_url={image_url[:80]}")
+
         # Download image bytes
         try:
             raw = _download_image(image_url)
@@ -1118,12 +1122,41 @@ async def generate_outfit_image(
             else str(product.piece_type or "")
         ).strip()
 
+        # Build a color-accurate description for the AI prompt.
+        # IMPORTANT: We do NOT use product.name here because Turkish product names often
+        # contain color words (e.g. "Siyah" = black) that contradict the actual selected
+        # color variant. The AI would then generate the wrong color even when given the
+        # correct image. Instead, we describe the garment by its slot type and the actual
+        # hex color mapped to an English color name.
+        HEX_TO_COLOR: dict[str, str] = {
+            "#111111": "black", "#000000": "black",
+            "#FFFFFF": "white", "#F5F5F5": "white", "#FAFAFA": "off-white",
+            "#E8D5B0": "beige/tan", "#D2B48C": "tan", "#F5DEB3": "wheat/beige",
+            "#92400E": "dark brown", "#6B4423": "brown", "#8B4513": "saddle brown",
+            "#2563EB": "blue", "#1E3A5F": "navy blue", "#1F2C4D": "dark navy",
+            "#38BDF8": "light blue", "#3B82F6": "blue",
+            "#9CA3AF": "gray", "#6B7280": "gray", "#4B5563": "dark gray",
+            "#6B7C3A": "olive green", "#4D7C0F": "green",
+            "#E8D5B0": "beige", "#F472B6": "pink", "#800020": "burgundy",
+            "#D4AF37": "gold", "#C0C0C0": "silver",
+        }
+        variant_color_hex = (variant.color or "").upper()
+        color_name = HEX_TO_COLOR.get(variant_color_hex, "")
+        if not color_name and variant_color_hex.startswith("#"):
+            # Generic fallback: use the hex itself so the AI at least knows the color
+            color_name = f"color {variant_color_hex}"
+
+        slot_label = piece_type_str or "garment"
+        # Description that won't confuse the AI with wrong color words from product names
+        color_accurate_name = f"{slot_label} ({color_name})" if color_name else slot_label
+
         product_image_data.append({
             "raw": raw,
             "mime": mime,
-            "name": product.name or product.category or "garment",
-            "piece_type": piece_type_str or product.category or "garment",
+            "name": color_accurate_name,
+            "piece_type": slot_label,
             "category": product.category or "",
+            "color": color_name,
         })
 
     if not product_image_data:
@@ -1148,71 +1181,17 @@ async def generate_outfit_image(
     # NOTE: Every template is injected INTO the strict prompt below — the
     # creative direction applies ONLY to pose/scene, never to clothing content.
     # -----------------------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # Ultra-premium prompt configuration
+    # -----------------------------------------------------------------------
     import random
 
     POSE_TEMPLATES = [
-        # 1. Standard E-commerce Hero Pose
-        (
-            "Pose: full-body centered hero pose, front-facing, arms relaxed naturally at the sides, "
-            "perfect symmetry, clean luxury studio environment, soft professional lighting, "
-            "high-end fashion catalog photography. In the background, a modern store sign "
-            "reading 'Mode' is visible on a minimalist wall."
-        ),
-        # 2. Slight Angle Catalog Pose
-        (
-            "Pose: slight 30-45 degree body turn, one shoulder slightly forward to show garment shape, "
-            "professional fashion catalog pose, clean studio background, softbox lighting. "
-            "The word 'Mode' appears as a stylish store sign in the background."
-        ),
-        # 3. Walking Motion Pose
-        (
-            "Pose: mid-walking pose frozen in time, natural movement in legs and clothing folds, "
-            "dynamic fashion advertising style, luxury studio environment, cinematic lighting. "
-            "Behind the mannequin, a clean modern store interior with the brand name 'Mode' "
-            "displayed as a wall sign."
-        ),
-        # 4. Editorial Fashion Pose
-        (
-            "Pose: high-fashion editorial stance, subtle body twist, expressive posture, "
-            "luxury magazine style photography, dramatic soft lighting, minimal studio environment. "
-            "The background includes a sleek 'Mode' store sign integrated into the wall design."
-        ),
-        # 5. Hands-in-Pockets Casual Pose
-        (
-            "Pose: relaxed casual with hands placed in pockets, natural weight shift on one leg, "
-            "modern streetwear fashion style, premium studio lighting, clean background. "
-            "The brand name 'Mode' is displayed as a minimalist store sign behind the mannequin."
-        ),
-        # 6. Product Front Focus
-        (
-            "Pose: perfectly centered, front-facing, symmetrical posture, "
-            "optimized for online product display, neutral studio background, soft even lighting. "
-            "Behind the mannequin, a subtle elegant store sign reading 'Mode'."
-        ),
-        # 7. Luxury Boutique Interior Scene
-        (
-            "Pose: placed inside a luxury boutique store environment, elegant interior design, "
-            "warm lighting, premium retail aesthetic. The brand name 'Mode' appears as a "
-            "stylish illuminated store sign on the back wall."
-        ),
-        # 8. Dynamic Twist Pose
-        (
-            "Pose: dynamic body twist showing garment movement and structure, "
-            "fashion campaign style, cinematic studio lighting, modern luxury aesthetic. "
-            "The background features a clean wall with the store sign 'Mode' integrated."
-        ),
-        # 9. Sitting / Leaning Pose
-        (
-            "Pose: seated or slightly leaning in a relaxed fashion pose, "
-            "lifestyle fashion photography style, soft natural shadows, premium studio setup. "
-            "In the background, a minimalist store interior with the brand name 'Mode' as a wall sign."
-        ),
-        # 10. Neon / Luxury Brand Look
-        (
-            "Pose: cinematic fashion studio with dramatic lighting, slightly dark environment, "
-            "luxury advertising mood. Behind the mannequin, a glowing neon sign reading 'Mode', "
-            "modern fashion brand aesthetic, high contrast."
-        ),
+        "full-body centered hero pose, front-facing, arms relaxed naturally at the sides, perfect symmetry",
+        "slight 30-45 degree body turn, one shoulder slightly forward to show garment shape",
+        "mid-walking pose frozen in time, natural movement in legs and clothing folds",
+        "high-fashion editorial stance, subtle body twist, expressive posture",
+        "relaxed casual with hands placed in pockets, natural weight shift on one leg"
     ]
 
     chosen_pose = random.choice(POSE_TEMPLATES)
@@ -1224,8 +1203,7 @@ async def generate_outfit_image(
 
         "❌ RULE 1 — NO REAL HUMANS:\n"
         "   Do NOT generate a real human being, human face, human skin, or live model.\n"
-        "   Use ONLY a plastic store display mannequin — rigid, featureless, matte-finish, "
-        "like a retail window dummy.\n\n"
+        "   Use ONLY a matte dark graphite plastic mannequin with a smooth faceless head.\n\n"
 
         "❌ RULE 2 — STRICT CLOTHING INVENTORY (MOST IMPORTANT RULE):\n"
         f"   EXACTLY {item_count} clothing item(s) have been uploaded. "
@@ -1271,15 +1249,21 @@ async def generate_outfit_image(
         "   [ ] I have read each per-image directive and will extract ONLY the named garment type\n\n"
 
         "════════════════════════════════════════════════════════\n"
-        "SCENE & PHOTOGRAPHY DIRECTION:\n"
+        "SCENE & PHOTOGRAPHY DIRECTION (ULTRA-PREMIUM):\n"
         "════════════════════════════════════════════════════════\n"
-        f"{chosen_pose}\n"
-        "Ultra realistic, sharp fabric details, 8k, high-end fashion e-commerce catalog photo.\n\n"
+        "Ultra-premium fashion studio photography, full-body matte dark graphite mannequin with smooth faceless head, realistic proportions, luxury retail display style, standing in a minimalist high-end fashion showroom.\n\n"
+        "Background: clean seamless warm beige backdrop with a subtle gradient, elegant minimalist studio environment, no text, no logos, no branding, no signs, uncluttered luxury fashion background.\n\n"
+        "Lighting: professional softbox lighting setup, soft diffused key light from front-left, subtle fill light, gentle rim light outlining the mannequin, smooth natural shadows, luxury e-commerce catalog lighting, balanced contrast, soft reflections on the mannequin surface, premium commercial fashion photography.\n\n"
+        "Camera: full body shot, eye-level angle, 85mm lens, shallow depth of field, centered composition, ultra sharp focus, professional fashion catalog quality.\n\n"
+        f"Pose: {chosen_pose}\n\n"
+        f"Outfit: {clothing_description}\n\n"
+        "Style: luxury fashion advertising, premium clothing catalog, modern minimalist aesthetic, photorealistic, ultra detailed, realistic fabric textures, clean composition, high-end retail photography, studio quality, 8K.\n\n"
+        "Maintain identical mannequin style, identical lighting setup, identical background, identical camera angle, identical fashion photography aesthetic. Only change the clothing and pose.\n\n"
 
         "════════════════════════════════════════════════════════\n"
         "FINAL OUTPUT REQUIREMENT:\n"
         "════════════════════════════════════════════════════════\n"
-        f"One image of a plastic retail display mannequin wearing EXACTLY AND ONLY: {clothing_description}.\n"
+        f"One image of a matte dark graphite mannequin wearing EXACTLY AND ONLY: {clothing_description}.\n"
         "Zero extra clothing. Zero AI-added styling. Zero creative liberties with garments.\n"
         "Absolutely no real human beings.\n"
         "Each garment is taken ONLY from the named product in its per-image directive below."
@@ -1297,12 +1281,20 @@ async def generate_outfit_image(
 
     for idx, entry in enumerate(product_image_data):
         slot_label = entry["piece_type"] or entry["category"] or "garment"
+        color_note = entry.get("color", "")
+        color_directive = (
+            f"  ✅ This {slot_label} is {color_note} colored — reproduce EXACTLY this color\n"
+            f"  ⛔ Do NOT change the color to black, white, or any other color\n"
+            if color_note else ""
+        )
         per_image_directive = (
             f"━━━━ PRODUCT IMAGE {idx + 1} OF {item_count} ━━━━\n"
-            f"Product name : {entry['name']}\n"
             f"Garment type : {slot_label}\n"
-            f"EXTRACTION RULE: From this image, extract and use ONLY the {slot_label} named\n"
-            f"  '{entry['name']}'.\n"
+            f"COLOR (CRITICAL): {color_note if color_note else 'match the image exactly'}\n"
+            f"EXTRACTION RULE: From this image, extract and use ONLY the {slot_label}.\n"
+            f"COLOR RULE: The {slot_label} in this image is {color_note} — you MUST reproduce\n"
+            f"  this EXACT color on the mannequin. Do NOT substitute a different color.\n"
+            f"{color_directive}"
             f"IGNORE EVERYTHING ELSE in this image:\n"
             f"  ⛔ Any other clothing items visible (even partially) — IGNORE them completely\n"
             f"  ⛔ Background garments, mannequin clothing, model's own clothing — IGNORE\n"
@@ -1603,24 +1595,28 @@ async def virtual_try_on(
     category_hint = f" ({product.category})" if product.category else ""
 
     tryon_prompt = (
-        f"You are an expert virtual fashion try-on system.\n\n"
+        f"You are an expert e-commerce fashion visualization assistant. "
+        f"Your task is to produce a photorealistic fashion catalog image.\n\n"
+
         f"INPUTS:\n"
-        f"- Image 1: A photo of a target PERSON (this is the user who wants to try on the clothing).\n"
-        f"- Image 2: A fashion product image showing '{product.name}'{category_hint}.\n\n"
-        f"CRITICAL WARNING ON IDENTITY AND REFERENCE:\n"
-        f"Image 2 (the product image) may show a human model wearing the garment. You must treat Image 2 EXCLUSIVELY as a clothing/garment reference. Do NOT copy, blend, or reference any identity details of the model shown in Image 2. The target person from Image 1 is the ONLY source of identity information. Ignore the model's face, hair, eyes, nose, lips, skin tone, body shape, hands, neck, pose, and background from Image 2 completely.\n\n"
-        f"YOUR TASK — follow every rule exactly:\n\n"
-        f"STEP 1 — PRESERVE THE TARGET PERSON'S IDENTITY (FROM IMAGE 1):\n"
-        f"  • The target person's FACE, HAIR, SKIN TONE, BODY SHAPE, BODY PROPORTIONS, POSE, EXPRESSION, and LIGHTING in the output must remain 100% IDENTICAL to Image 1.\n"
-        f"  • Do not replace or modify the target person's face, features, hairstyle, skin color, hands, or pose. Do not blend any model features from Image 2 into the target person.\n\n"
-        f"STEP 2 — REMOVE THE TARGET PERSON'S ORIGINAL CLOTHING (FROM IMAGE 1):\n"
-        f"  • Completely erase the garment(s) the target person is wearing in the region to be covered by the new product.\n"
-        f"  • This includes sleeves, cuffs, collar, hem, and any protruding fabrics. Zero original clothing parts should peek out or layer underneath.\n\n"
-        f"STEP 3 — TRANSFER ONLY THE GARMENT (FROM IMAGE 2):\n"
-        f"  • Transfer ONLY the garment of '{product.name}' shown in Image 2 onto the target person's body from Image 1.\n"
-        f"  • Fully ignore the model's face, hair, skin, hands, neck, body, pose, background, accessories, furniture, or other non-clothing items in Image 2.\n"
-        f"  • Fit the garment naturally to the target person's body shape, proportions, and pose from Image 1. Keep the exact color, texture, print, pattern, design, and details of the garment from Image 2.\n\n"
-        f"OUTPUT: One single photorealistic image of the target person from Image 1 wearing the new garment from Image 2, keeping the target person's identity and background 100% unchanged."
+        f"- Image 1: A reference photo of a PERSON (the model for this catalog shoot).\n"
+        f"- Image 2: A fashion product — '{product.name}'{category_hint} — shown on a store model.\n\n"
+
+        f"TASK: Create a new photorealistic catalog image showing the PERSON from Image 1 "
+        f"wearing the '{product.name}' garment from Image 2.\n\n"
+
+        f"STRICT RULES:\n"
+        f"1. PERSON IDENTITY (from Image 1): Preserve the person's face, hair, skin tone, "
+        f"body shape, pose, expression, and background EXACTLY as they appear in Image 1. "
+        f"Do not alter any facial features, hairstyle, or skin color.\n\n"
+        f"2. GARMENT (from Image 2): Render the '{product.name}' garment onto the person's body "
+        f"from Image 1. Maintain the garment's exact color, texture, fabric, pattern, buttons, "
+        f"stitching, and all design details from Image 2. Fit it naturally to their body shape and pose.\n\n"
+        f"3. GARMENT SOURCE (from Image 2 only): Extract ONLY the '{product.name}' garment itself. "
+        f"Ignore the model, face, hair, background, accessories, and any other items visible in Image 2.\n\n"
+        f"4. OUTPUT: One single photorealistic image — the person from Image 1 naturally wearing "
+        f"the '{product.name}' from Image 2, as if photographed in a professional fashion catalog shoot.\n\n"
+        f"This is a standard e-commerce product visualization for retail fashion purposes."
     )
 
     # 6. Call gemini-2.5-flash-image via REST (generateContent with responseModalities IMAGE)
@@ -1681,8 +1677,14 @@ async def virtual_try_on(
             break
 
     if not generated_bytes:
-        # Log what the model actually returned for debugging
-        print(f"[TryOn] No image in response. Full result: {str(result)[:800]}")
+        # Log the full Gemini response to diagnose why no image was returned
+        candidates = result.get("candidates", [])
+        for i, c in enumerate(candidates):
+            finish = c.get("finishReason", "UNKNOWN")
+            safety = c.get("safetyRatings", [])
+            parts_info = [list(p.keys()) for p in c.get("content", {}).get("parts", [])]
+            print(f"[TryOn] candidate[{i}] finishReason={finish}, safetyRatings={safety}, parts_keys={parts_info}")
+        print(f"[TryOn] No image in response. Full result: {str(result)[:1200]}")
         raise HTTPException(
             status_code=502,
             detail=(
