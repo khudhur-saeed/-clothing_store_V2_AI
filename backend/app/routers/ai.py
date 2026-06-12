@@ -306,101 +306,71 @@ def _find_products(db: Session, message: str, limit: int = 3) -> tuple[list, Opt
     color_filter = _extract_color_hint(message)
     print(f"[chat search] message={message!r}  color_filter={color_filter}")
 
-    # Translate query to fashion-focused English/Turkish keywords
-    search_query = _translate_query_to_keywords(message)
-    print(f"[chat search] translated={search_query!r}")
-
-    # Flat set of every known color alias word — stripped from keyword tokens
-    # because color_filter already handles color matching.
-    all_color_words: set = set(COLOR_ALIASES.keys())
-
-    def _non_color_tokens(raw: str) -> list:
-        """Split raw string into tokens, dropping pure color alias words.
-        Minimum length 3 to avoid Turkish character-split fragments (e.g. 'ti', 'rt' from 'tişört').
-        """
-        return [
-            t for t in re.split(r"[^a-z0-9ıiöouügğşscç]+", raw.lower())
-            if len(t) > 2 and t not in all_color_words
-        ]
-
-    def _token_match(token: str):
-        """Match token in product name or description, ignoring spaces and hyphens."""
-        from sqlalchemy import func
-        clean_name = func.replace(func.replace(Product.name, '-', ''), ' ', '')
-        clean_desc = func.replace(func.replace(Product.description, '-', ''), ' ', '')
-        return or_(
-            clean_name.ilike(f"%{token}%"),
-            clean_desc.ilike(f"%{token}%"),
-        )
-
-    def _color_name_match():
-        """OR filter: any color alias appears in product name or description."""
-        return or_(*[
-            or_(
-                Product.name.ilike(f"%{c}%"),
-                Product.description.ilike(f"%{c}%"),
-            )
-            for c in color_filter
-        ])
-
-    # Build keyword tokens from the translated query (type words like "shirt", "pantolon")
-    # Fall back to the ORIGINAL message if the translation produces only short fragments
-    # (e.g. Gemini translates "white t shirt" → "beyaz tişört\nwhite t shirt" and the
-    # Turkish "tişört" splits into unusable 'ti'/'rt' fragments).
-    hint = _extract_product_hint(search_query)
-    if hint:
-        kw_tokens = _non_color_tokens(hint)
-    else:
-        kw_tokens = _non_color_tokens(search_query)
-
-    if not kw_tokens:
-        # Translation tokens were all too short — try the original message directly
-        kw_tokens = _non_color_tokens(message)
-    print(f"[chat search] kw_tokens={kw_tokens}")
+    # We bypass the slow, synchronous LLM translation here.
+    # Pass the context directly to Elasticsearch.
+    es_search_string = message
+    print(f"[chat search] query={es_search_string!r}")
 
     # ── 1. Try Elasticsearch ──────────────────────────────────────────────────
     try:
         from app.core.search import search_products, _is_es_available
         if _is_es_available():
-            es_ids = search_products(search_query)
+            es_ids = search_products(es_search_string)
             print(f"[chat search] ES ids={es_ids}")
             if es_ids:
                 id_order = {id_: index for index, id_ in enumerate(es_ids)}
-                base_q = (
+                # Fetch EXACTLY what Elasticsearch found, no redundant SQL filtering
+                products = (
                     db.query(Product)
                     .filter(Product.product_id.in_(es_ids), Product.status == "active")
+                    .all()
                 )
-                # Apply keyword filter so product TYPE is enforced (not just color)
-                if kw_tokens:
-                    base_q = base_q.filter(or_(*[_token_match(t) for t in kw_tokens[:4]]))
-                if color_filter:
-                    # Filter by color in the product NAME (not variant hex)
-                    base_q = base_q.filter(_color_name_match())
-                products = base_q.all()
                 products.sort(key=lambda p: id_order.get(p.product_id, 9999))
                 products = products[:limit]
                 print(f"[chat search] ES results: {[p.name for p in products]}")
                 if products:
                     return products, color_filter
                 # ES found IDs but filters returned 0 — fall through to DB
-                print("[chat search] ES filters returned empty, falling back to DB search")
+                print("[chat search] ES returned IDs but no active products found in DB")
     except Exception as es_err:
         print(f"[chat search] Elasticsearch error: {es_err}")
 
     # ── 2. Database Fallback (PostgreSQL ILIKE) ───────────────────────────────
-    print(f"[chat search] DB fallback  hint={hint!r}")
+    print(f"[chat search] DB fallback for query={es_search_string!r}")
     base_query = db.query(Product).filter(Product.status == "active")
 
-    if kw_tokens:
-        base_query = base_query.filter(or_(*[_token_match(t) for t in kw_tokens[:4]]))
+    # Clean the search string into tokens for ILIKE matching
+    from sqlalchemy import func
+    clean_name = func.replace(func.replace(Product.name, '-', ''), ' ', '')
+    clean_desc = func.replace(func.replace(Product.description, '-', ''), ' ', '')
+    
+    # Exclude color words from structural match so they don't force false negatives
+    all_color_words = set(COLOR_ALIASES.keys())
+    db_tokens = [
+        t for t in re.split(r"[^a-z0-9ıiöouügğşscç]+", es_search_string.lower())
+        if len(t) > 2 and t not in all_color_words
+    ]
+
+    if db_tokens:
+        token_filters = [
+            or_(
+                clean_name.ilike(f"%{t}%"),
+                clean_desc.ilike(f"%{t}%")
+            )
+            for t in db_tokens[:4]
+        ]
+        base_query = base_query.filter(or_(*token_filters))
     elif not color_filter:
         print("[chat search] no usable tokens and no color — returning empty")
         return [], color_filter
-    # else: only a color was given — color_filter block below handles it
 
     if color_filter:
         # Colors live in product names — search aliases in name/description.
-        base_query = base_query.filter(_color_name_match())
+        color_filters = [
+            or_(Product.name.ilike(f"%{c}%"), Product.description.ilike(f"%{c}%"))
+            for c in color_filter
+        ]
+        base_query = base_query.filter(or_(*color_filters))
 
     results = base_query.distinct().limit(limit).all()
     print(f"[chat search] DB results: {[p.name for p in results]}")
@@ -768,12 +738,31 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
                 "products": [],
             }
 
+        msg_lower = message.lower()
+        is_order_intent = any(w in msg_lower for w in ["order", "delivery", "track", "shipping", "status", "where is", "when will"])
+        is_coupon_intent = any(w in msg_lower for w in ["coupon", "discount", "promo", "code", "sale", "offer"])
+        is_address_intent = any(w in msg_lower for w in ["address", "location", "ship to", "send to"])
+        # Default to product intent if nothing else matches clearly, or explicitly requested
+        is_product_intent = any(w in msg_lower for w in ["shirt", "pants", "shoe", "jacket", "size", "color", "price", "buy", "show", "find", "looking", "have"]) or not (is_order_intent or is_coupon_intent or is_address_intent)
+
+        # Build a multi-turn search query by concatenating the last 2 user messages to preserve context
+        recent_user_msgs = [m.content for m in request.history[-4:] if m.sender_type == "user"]
+        search_context = " ".join(recent_user_msgs + [message])
+
         # Retrieve dynamic product list from database based on search/query
-        products, color_filter = _find_products(db, message, limit=4)
+        products, color_filter = _find_products(db, search_context, limit=4) if is_product_intent else ([], None)
         product_payloads = []
         if products:
+            product_ids = [p.product_id for p in products]
+            all_variants = db.query(ProductVariant).filter(ProductVariant.product_id.in_(product_ids)).all()
+            
+            from collections import defaultdict
+            variants_by_product = defaultdict(list)
+            for v in all_variants:
+                variants_by_product[v.product_id].append(v)
+                
             for product in products:
-                variants = db.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
+                variants = variants_by_product[product.product_id]
                 payload = _format_product_result(product, variants, color_filter=color_filter)
                 product_payloads.append(payload)
 
@@ -822,23 +811,24 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
                 )
 
             # C. Coupon Context
-            coupons = _valid_coupon_query(db, limit=5)
-            if coupons:
-                coupon_context = ["AVAILABLE_ACTIVE_COUPONS:"]
-                for coupon in coupons:
-                    payload = _serialize_coupon_for_chat(coupon)
-                    validity = "Valid" if payload["is_valid"] else "Not currently valid"
-                    coupon_context.append(
-                        f"- Code: {payload['coupon_code']}\n"
-                        f"  Discount: {payload['discount']:.0f}%\n"
-                        f"  Minimum Order: {_format_currency(payload['min_order_amount'])}\n"
-                        f"  Validity: {validity}\n"
-                        f"  Expiration Date: {payload['expiration_date'] or 'None'}"
-                    )
-                context_parts.append("\n".join(coupon_context))
+            if is_coupon_intent:
+                coupons = _valid_coupon_query(db, limit=5)
+                if coupons:
+                    coupon_context = ["AVAILABLE_ACTIVE_COUPONS:"]
+                    for coupon in coupons:
+                        payload = _serialize_coupon_for_chat(coupon)
+                        validity = "Valid" if payload["is_valid"] else "Not currently valid"
+                        coupon_context.append(
+                            f"- Code: {payload['coupon_code']}\n"
+                            f"  Discount: {payload['discount']:.0f}%\n"
+                            f"  Minimum Order: {_format_currency(payload['min_order_amount'])}\n"
+                            f"  Validity: {validity}\n"
+                            f"  Expiration Date: {payload['expiration_date'] or 'None'}"
+                        )
+                    context_parts.append("\n".join(coupon_context))
 
             # D. Order Context
-            if current_user:
+            if current_user and is_order_intent:
                 # Check for a specific order ID in message
                 specific_order = _find_order_for_user(db, current_user, message)
                 if specific_order:
@@ -873,7 +863,7 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
                     context_parts.append("\n".join(orders_context))
             
             # E. Address Context
-            if current_user:
+            if current_user and is_address_intent:
                 addresses = (
                     db.query(Address)
                     .filter(Address.user_id == current_user.user_id)
@@ -903,7 +893,9 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
                     formatted_history.append({"role": role, "parts": [content]})
             
             # Initialize model with system instructions
-            model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=SYSTEM_INSTRUCTIONS)
+            import os
+            model_name = os.getenv("VITE_GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+            model = genai.GenerativeModel(model_name, system_instruction=SYSTEM_INSTRUCTIONS)
             
             contents = []
             for h in formatted_history:
@@ -947,14 +939,10 @@ def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db), current_us
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         error_msg = str(e)
         print(f"Error in chat: {error_msg}")
-        raise HTTPException(status_code=500, detail=VERIFICATION_FALLBACK)
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error in chat: {error_msg}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=VERIFICATION_FALLBACK)
 
 

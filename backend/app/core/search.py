@@ -53,6 +53,8 @@ def create_index():
             "department": {"type": "keyword"},
             "outfit_slot": {"type": "keyword"},
 
+            "colors": {"type": "text"},
+
             "price": {"type": "float"},
         }
     }
@@ -75,6 +77,35 @@ def index_product(product):
     'product' is a SQLAlchemy Product model object from our database.
     Failures are logged but do NOT crash the API.
     """
+    # Extract variant colors using session if available
+    from sqlalchemy.orm import object_session
+    session = object_session(product)
+    colors = []
+    if session:
+        from app.models.product_variant import ProductVariant
+        variants = session.query(ProductVariant).filter(ProductVariant.product_id == product.product_id).all()
+        # Simple hex mapper matching the AI module logic
+        hex_to_color = {
+            "#111111": "black siyah", "#000000": "black siyah",
+            "#FFFFFF": "white beyaz", "#F5F5F5": "white beyaz", "#FAFAFA": "off-white ekru",
+            "#E8D5B0": "beige bej", "#D2B48C": "tan taba", "#F5DEB3": "wheat bej",
+            "#92400E": "dark brown koyu kahverengi", "#6B4423": "brown kahverengi", "#8B4513": "saddle brown taba",
+            "#2563EB": "blue mavi", "#1E3A5F": "navy blue lacivert", "#1F2C4D": "dark navy lacivert",
+            "#38BDF8": "light blue açık mavi", "#3B82F6": "blue mavi",
+            "#9CA3AF": "gray gri", "#6B7280": "gray gri", "#4B5563": "dark gray koyu gri",
+            "#6B7C3A": "olive green haki", "#4D7C0F": "green yeşil",
+            "#F472B6": "pink pembe", "#800020": "burgundy bordo",
+            "#D4AF37": "gold altın", "#C0C0C0": "silver gümüş",
+        }
+        for v in variants:
+            if v.color:
+                upper_hex = v.color.upper()
+                if upper_hex in hex_to_color:
+                    colors.extend(hex_to_color[upper_hex].split())
+                elif not upper_hex.startswith("#"):
+                    # It's already text (like "Black" or "Siyah")
+                    colors.append(v.color)
+
     doc = {
         "product_id": product.product_id,
         "name": product.name,
@@ -84,6 +115,7 @@ def index_product(product):
         "status": product.status,
         "department": product.department.value if product.department else None,
         "outfit_slot": product.piece_type.value if product.piece_type else None,
+        "colors": list(set(colors)),
     }
 
     try:
@@ -134,6 +166,7 @@ def search_products(search_string: str):
                     "category^2",
                     "department",
                     "outfit_slot",
+                    "colors^2"
                 ],
                 "operator": "or",
                 "fuzziness": "AUTO",  # Allows minor typos (e.g. "denm" -> "denim")

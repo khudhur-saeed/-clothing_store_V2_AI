@@ -1,0 +1,30 @@
+=== Arabic Prompt (البرومبت باللغة العربية) ===
+
+أنت مهندس برمجيات معماري (Software Architect) وقائد تقني خبير. أريد منك تحليل وشرح مشروعي البرمجي بالكامل (متجر ملابس ذكي مدعوم بالذكاء الاصطناعي) من البداية إلى النهاية. 
+يرجى تزويدي بتوثيق تقني شامل وتفصيلي يحتوي على:
+
+1. نظرة عامة (Overview): فكرة المشروع والميزات الأساسية (مثل المساعد الذكي Chatbot، تجربة الملابس الافتراضية Virtual Try-On، وبناء الأطقم Outfit Builder).
+2. معمارية النظام (System Architecture): شرح معمق للواجهة الأمامية (Frontend) والواجهة الخلفية (Backend) وكيفية الربط بينهما.
+3. قواعد البيانات ومحركات البحث (Database & Search): كيف يتم تخزين البيانات، ودور محرك البحث Elasticsearch في جلب المنتجات والبحث السريع.
+4. مسارات العمل والتدفق (Core Workflows): شرح تفصيلي لكيفية عمل الميزات الرئيسية خطوة بخطوة (مثلاً: دورة حياة طلب المستخدم في الشات بوت وكيفية استدعاء النماذج اللغوية).
+5. هيكلية المشروع (Project Structure): تفصيل للمجلدات الرئيسية في المشروع ودور كل ملف رئيسي.
+6. التقنيات المستخدمة (Tech Stack): سرد للتقنيات واللغات المستخدمة.
+
+يرجى كتابة الشرح بتنسيق Markdown احترافي، ليكون مناسباً لتقرير مشروع تخرج (Graduation Project Report) أو كملف README. استخدم رسومات (Mermaid Diagrams) لتوضيح هيكلية النظام وتدفق البيانات متى ما كان ذلك مفيداً.
+
+=======================================================
+
+=== English Prompt (البرومبت باللغة الإنجليزية - يُفضل استخدامه للحصول على أفضل دقة تقنية) ===
+
+Act as an expert Software Architect and Technical Lead. I want you to completely analyze and explain my full-stack e-commerce project (AI-powered Clothing Store) from start to finish.
+
+Please provide a comprehensive and detailed technical documentation that includes:
+
+1. High-Level Overview: The project's main purpose and its core features (e.g., AI Chatbot, Virtual Try-On, Outfit Builder).
+2. System Architecture: Detailed explanation of the frontend and backend (e.g., FastAPI), including their API communication and architecture patterns.
+3. Database & Search Engine: Explain the role of the primary database and Elasticsearch in storing, indexing, and retrieving the product catalog efficiently.
+4. Core Workflows: Step-by-step execution flow of the main features (e.g., how a user's message flows through the AI chatbot, or how the Virtual Try-On feature communicates with external AI services).
+5. Project Structure: A detailed breakdown of the core directories and their specific responsibilities.
+6. Technology Stack: A categorized summary of all key frameworks, libraries, and tools used in this project.
+
+Please format the response as a highly professional Markdown document, suitable for a graduation project report or an official repository README. Use Mermaid diagrams to illustrate the system architecture and data flows where appropriate.
